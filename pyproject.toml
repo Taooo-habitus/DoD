@@ -1,0 +1,104 @@
+[project]
+name = "DoD"
+version = "0.1.0"
+description = "Document Digestion Layer."
+authors = [
+    { name = "Tao Tang", email = "ttan@habitus.dk" }
+]
+readme = "README.md"
+dependencies = []
+requires-python = ">= 3.11"
+
+[tool.uv]
+dev-dependencies = [
+    "mkapi>=4.0.0",
+    "mkdocs>=1.6.1",
+    "mkdocs-include-dir-to-nav>=1.2.0",
+    "mkdocs-include-markdown-plugin>=7.1.4",
+    "mkdocs-material>=9.6.3",
+    "ty>=0.0.8",
+    "nbstripout>=0.8.1",
+    "pip>=25.0.1",
+    "pre-commit>=4.1.0",
+    "pytest>=8.3.4",
+    "pytest-cov>=6.0.0",
+    "coverage>=7.6.11",
+    "readme-coverage-badger>=1.0.1",
+    "ruff>=0.9.6",
+    "hydra-core>=1.3.2",
+]
+
+
+[project.urls]
+Repository = "Your repository URL"
+Issues = "Your repository URL/issues"
+
+[tool.ruff]
+target-version = "py310"
+line-length = 88
+exclude = [
+    ".git",
+    ".pytest_cache",
+    ".ruff_cache",
+    ".venv",
+]
+extend-include = [
+    "*.ipynb",
+]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+docstring-code-format = true
+skip-magic-trailing-comma = true
+
+[tool.ruff.lint]
+extend-select = [
+    "I",
+    "D",
+]
+
+[tool.ruff.lint.extend-per-file-ignores]
+"__init__.py" = [
+    "F401",
+]
+"src/scripts/main.py" = [
+    "I",
+]
+
+[tool.ruff.lint.isort]
+split-on-trailing-comma = false
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
+[tool.ty]
+
+[tool.ty.rules]
+possibly-missing-import = "ignore"
+
+[tool.pytest.ini_options]
+minversion = "7.0"
+addopts = [
+    "--cov=src/DoD",
+    "--color=yes",
+]
+xfail_strict = true
+filterwarnings = [
+    "error",
+    "ignore::UserWarning",
+    "ignore::DeprecationWarning",
+    "ignore::PendingDeprecationWarning",
+    "ignore::ImportWarning",
+    "ignore::ResourceWarning",
+    "ignore::FutureWarning",
+]
+log_cli_level = "INFO"
+testpaths = [
+    "tests",
+    "src/DoD",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
