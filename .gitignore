@@ -178,3 +178,6 @@ outputs/
 
 # System
 .DS_Store
+
+examples/
+artifacts/

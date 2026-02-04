@@ -2,5 +2,46 @@ hydra:
   run:
     dir: outputs/${now:%Y-%m-%d}/${now:%H-%M-%S}
 
+input_path: ""
 run_mode: "dev"
 logging_level: "INFO"
+
+normalize:
+  dpi: 200
+  image_format: "png"
+  max_pages: null
+
+ocr:
+  backend: "glm_ocr"
+  batch_size: 1
+  language_hint: null
+  device: null
+  glmocr_model: "zai-org/GLM-OCR"
+  glmocr_prompt: "Text Recognition:"
+  glmocr_max_new_tokens: 4096
+  glmocr_api_host: null
+  glmocr_api_port: null
+  glmocr_maas_enabled: null
+  glmocr_api_key: null
+
+page_table:
+  include_metadata: true
+
+toc:
+  backend: "pageindex"
+  model: "gpt-4o-2024-11-20"
+  api_key: null
+  api_base_url: null
+  toc_check_page_num: 20
+  max_page_num_each_node: 10
+  max_token_num_each_node: 20000
+  if_add_node_id: "yes"
+  if_add_node_summary: "yes"
+  if_add_doc_description: "no"
+  if_add_node_text: "no"
+
+artifacts:
+  output_dir: "artifacts"
+  page_table_filename: "page_table.jsonl"
+  toc_filename: "toc_tree.json"
+  manifest_filename: "manifest.json"

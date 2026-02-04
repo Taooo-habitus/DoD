@@ -1,16 +1,18 @@
 """Main entrypoint for the project."""
 
-import hydra
-from omegaconf import DictConfig
-import logging
+from __future__ import annotations
 
+import os
+import shlex
+import sys
 
-@hydra.main(config_path="../../conf", config_name="config", version_base=None)
-def main(cfg: DictConfig):
-    """Run the main application with Hydra config."""
-    logging.basicConfig(level=getattr(logging, cfg.logging_level.upper(), logging.INFO))
-    logging.info("Hello from your new Hydra-powered Python template!")
+from DoD.cli.main import main
 
 
 if __name__ == "__main__":
+    # Hydra override parsing fails on empty argv tokens; sanitize and allow env overrides.
+    sys.argv = [arg for arg in sys.argv if arg and arg.strip()]
+    extra_overrides = os.getenv("DOD_OVERRIDES")
+    if extra_overrides:
+        sys.argv.extend(shlex.split(extra_overrides))
     main()
