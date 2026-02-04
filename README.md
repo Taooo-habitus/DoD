@@ -42,6 +42,8 @@ pdf2image    - PDF normalization to images (requires poppler)
 glmocr       - GLM-OCR SDK backend (requires a model server or MaaS)
 transformers - GLM-OCR Transformers backend (requires torch)
 pillow       - image loading for Transformers backend
+requests     - Ollama OCR backend
+tqdm         - OCR progress bars
 ```
 
 ## Quickstart
@@ -133,6 +135,22 @@ uv run python -m scripts.main \
 ### 3) Dummy OCR (`ocr.backend=dummy`)
 
 Runs end-to-end without OCR (empty page text). Useful for wiring tests.
+
+### 4) Ollama OCR (`ocr.backend=ollama_ocr`)
+
+Uses a local Ollama server with a vision-capable model (e.g., `glm-ocr:q8_0`).
+
+```bash
+uv run python -m scripts.main \
+  input_path=examples/Paa-vej-til-dansk.pdf \
+  ocr.backend=ollama_ocr \
+  ocr.ollama_model=glm-ocr:q8_0 \
+  ocr.ollama_host=http://localhost:11434 \
+  ocr.ollama_api_path=/api/chat \
+  ocr.ollama_max_long_edge=1600 \
+  toc.backend=pageindex \
+  toc.model=claude-sonnet-4-5
+```
 
 ## Using Snowflake Cortex (PageIndex)
 

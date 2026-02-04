@@ -70,7 +70,11 @@ class GlmOcrTransformersExtractor(TextExtractor):
             ) from exc
 
         records: List[PageRecord] = []
-        for idx, image_path in enumerate(image_paths, start=1):
+        for idx, image_path in self._progress(
+            enumerate(image_paths, start=1),
+            total=len(image_paths),
+            desc="OCR (Transformers)",
+        ):
             image = Image.open(image_path).convert("RGB")
             messages = [
                 {

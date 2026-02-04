@@ -30,6 +30,12 @@ class OcrConfig:
     glmocr_api_port: Optional[int] = None
     glmocr_maas_enabled: Optional[bool] = None
     glmocr_api_key: Optional[str] = None
+    ollama_host: str = "http://localhost:11434"
+    ollama_model: str = "glm-ocr:q8_0"
+    ollama_prompt: str = "Recognize the text in the image and output in Markdown."
+    ollama_timeout: int = 300
+    ollama_api_path: str = "/api/chat"
+    ollama_max_long_edge: Optional[int] = 1600
 
 
 @dataclass

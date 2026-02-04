@@ -14,6 +14,14 @@ class TextExtractor(ABC):
 
     requires_images: bool = True
 
+    @staticmethod
+    def _progress(iterable, total: int | None = None, desc: str = "OCR"):
+        try:
+            from tqdm import tqdm
+        except ImportError:
+            return iterable
+        return tqdm(iterable, total=total, desc=desc)
+
     @abstractmethod
     def extract(
         self, input_path: Path, image_paths: Optional[List[Path]] = None

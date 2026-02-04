@@ -364,6 +364,7 @@ source = { editable = "." }
 dependencies = [
     { name = "hydra-core" },
     { name = "omegaconf" },
+    { name = "tqdm" },
 ]
 
 [package.optional-dependencies]
@@ -414,6 +415,7 @@ requires-dist = [
     { name = "requests", marker = "extra == 'ocr'", specifier = ">=2.32.0" },
     { name = "tiktoken", marker = "extra == 'pageindex'", specifier = ">=0.7.0" },
     { name = "torch", marker = "extra == 'ocr'", specifier = ">=2.2.0" },
+    { name = "tqdm", specifier = ">=4.67.2" },
     { name = "transformers", marker = "extra == 'ocr'", specifier = ">=4.40.0" },
 ]
 provides-extras = ["pageindex", "ocr", "pdf"]

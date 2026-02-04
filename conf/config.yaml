@@ -23,6 +23,12 @@ ocr:
   glmocr_api_port: null
   glmocr_maas_enabled: null
   glmocr_api_key: null
+  ollama_host: "http://localhost:11434"
+  ollama_model: "glm-ocr:latest"
+  ollama_prompt: "Recognize the text in the image and output in Markdown."
+  ollama_timeout: 300
+  ollama_api_path: "/api/chat"
+  ollama_max_long_edge: 1600
 
 page_table:
   include_metadata: true

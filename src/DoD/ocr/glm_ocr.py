@@ -77,7 +77,11 @@ class GlmOcrExtractor(TextExtractor):
             raise RuntimeError("GLM-OCR parser failed to initialize.")
         records: List[PageRecord] = []
 
-        for idx, image_path in enumerate(image_paths, start=1):
+        for idx, image_path in self._progress(
+            enumerate(image_paths, start=1),
+            total=len(image_paths),
+            desc="OCR (GLM-OCR)",
+        ):
             text = _extract_with_sdk(self._parser, image_path)
             records.append(
                 PageRecord(

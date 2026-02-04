@@ -83,7 +83,10 @@ def count_tokens(text: str, model: Optional[str] = None) -> int:
     except ImportError as exc:
         raise RuntimeError("tiktoken is required for token counting.") from exc
     if model:
-        enc = tiktoken.encoding_for_model(model)
+        try:
+            enc = tiktoken.encoding_for_model(model)
+        except KeyError:
+            enc = tiktoken.get_encoding("cl100k_base")
     else:
         enc = tiktoken.get_encoding("cl100k_base")
     tokens = enc.encode(text)

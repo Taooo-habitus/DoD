@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import logging
-from dataclasses import asdict
+from dataclasses import asdict, is_dataclass
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, cast
 
+from hydra.core.hydra_config import HydraConfig
 from hydra.utils import get_original_cwd
+from omegaconf import OmegaConf
 
 from DoD.config import PipelineConfig
 from DoD.io.artifacts import write_json
@@ -16,6 +18,7 @@ from DoD.ocr.base import TextExtractor
 from DoD.ocr.dummy import DummyExtractor
 from DoD.ocr.glm_ocr import GlmOcrExtractor
 from DoD.ocr.glm_ocr_transformers import GlmOcrTransformersExtractor
+from DoD.ocr.ollama_ocr import OllamaOcrExtractor
 from DoD.ocr.plain_text import PlainTextExtractor
 from DoD.page_table import PageRecord, write_page_table
 from DoD.toc.pageindex_adapter import PageIndexAdapter, fallback_toc
@@ -46,7 +49,12 @@ def _resolve_input_path(input_path: str) -> Path:
 
 
 def _prepare_output_dirs(cfg: PipelineConfig) -> Tuple[Path, Path]:
-    output_dir = Path.cwd() / cfg.artifacts.output_dir
+    output_root: Path
+    if HydraConfig.initialized():
+        output_root = Path(HydraConfig.get().runtime.output_dir)
+    else:
+        output_root = Path.cwd()
+    output_dir = output_root / cfg.artifacts.output_dir
     images_dir = output_dir / "images"
     output_dir.mkdir(parents=True, exist_ok=True)
     images_dir.mkdir(parents=True, exist_ok=True)
@@ -92,6 +100,15 @@ def _select_extractor(cfg: PipelineConfig, input_path: Path):
             device=cfg.ocr.device,
             max_new_tokens=cfg.ocr.glmocr_max_new_tokens,
         )
+    if backend == "ollama_ocr":
+        return OllamaOcrExtractor(
+            host=cfg.ocr.ollama_host,
+            model=cfg.ocr.ollama_model,
+            prompt=cfg.ocr.ollama_prompt,
+            timeout=cfg.ocr.ollama_timeout,
+            api_path=cfg.ocr.ollama_api_path,
+            max_long_edge=cfg.ocr.ollama_max_long_edge,
+        )
 
     raise ValueError(f"Unsupported OCR backend: {cfg.ocr.backend}")
 
@@ -101,7 +118,13 @@ def _generate_toc(
 ) -> Dict[str, object]:
     if cfg.toc.backend.lower() == "pageindex":
         try:
-            adapter = PageIndexAdapter(config=asdict(cfg.toc))
+            raw_config = (
+                asdict(cfg.toc)
+                if is_dataclass(cfg.toc)
+                else OmegaConf.to_container(cfg.toc, resolve=True)
+            )
+            toc_config = cast(Dict[str, Any], raw_config)
+            adapter = PageIndexAdapter(config=toc_config)
             return adapter.generate(input_path, page_records=page_records)
         except RuntimeError as exc:
             logger.warning("PageIndex unavailable, using fallback TOC. %s", exc)
@@ -122,11 +145,14 @@ def _write_artifacts(
     toc_path = output_dir / cfg.artifacts.toc_filename
     write_json(toc_path, toc_tree)
 
+    config_payload = (
+        asdict(cfg) if is_dataclass(cfg) else OmegaConf.to_container(cfg, resolve=True)
+    )
     manifest = {
         "input_path": str(input_path),
         "page_count": len(page_records),
         "artifacts": {"page_table": str(page_table_path), "toc_tree": str(toc_path)},
-        "config": asdict(cfg),
+        "config": config_payload,
     }
     manifest_path = output_dir / cfg.artifacts.manifest_filename
     write_json(manifest_path, manifest)
