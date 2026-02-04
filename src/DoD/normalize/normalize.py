@@ -14,6 +14,13 @@ def _is_image(path: Path) -> bool:
     return path.suffix.lower() in IMAGE_EXTENSIONS
 
 
+def _sorted_image_paths(input_dir: Path) -> List[Path]:
+    image_paths = sorted(p for p in input_dir.iterdir() if p.is_file() and _is_image(p))
+    if not image_paths:
+        raise ValueError(f"No images found in directory: {input_dir}")
+    return image_paths
+
+
 def normalize_to_images(
     input_path: Path,
     output_dir: Path,
@@ -31,12 +38,7 @@ def normalize_to_images(
     output_dir.mkdir(parents=True, exist_ok=True)
 
     if input_path.is_dir():
-        image_paths = sorted(
-            p for p in input_path.iterdir() if p.is_file() and _is_image(p)
-        )
-        if not image_paths:
-            raise ValueError(f"No images found in directory: {input_path}")
-        return _copy_images(image_paths, output_dir)
+        return _copy_images(_sorted_image_paths(input_path), output_dir)
 
     if _is_image(input_path):
         return _copy_images([input_path], output_dir)

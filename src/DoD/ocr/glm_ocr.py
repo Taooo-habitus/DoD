@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import sys
 from pathlib import Path
 from typing import Any, Callable, List, Optional, Protocol, cast
@@ -38,16 +37,10 @@ class GlmOcrExtractor(TextExtractor):
     def _load_pipeline(self) -> None:
         if self._parser is not None or self._mode == "http":
             return
-        try:
-            from glmocr.api import GlmOcr  # type: ignore[import-not-found]
-        except Exception:
-            _try_add_glmocr_source_to_path()
-            try:
-                from glmocr.api import GlmOcr  # type: ignore[import-not-found]
-            except Exception:
-                self._mode = "http"
-                return
-            # Fall back to HTTP mode (glmocr server /glmocr/parse).
+        GlmOcr = _import_glmocr()
+        if GlmOcr is None:
+            self._mode = "http"
+            return
 
         kwargs = {}
         if self.api_host is not None:
@@ -99,6 +92,8 @@ class GlmOcrExtractor(TextExtractor):
 
 
 class _GlmOcrParser(Protocol):
+    """Minimal protocol for GLM-OCR SDK parser objects."""
+
     def parse(self, path: str) -> Any: ...
 
 
@@ -118,6 +113,10 @@ def _extract_with_sdk(parser: _GlmOcrParser, image_path: Path) -> str:
         parse_fn: Callable[[str], Any] = parse
         result = parse_fn(str(image_path))
 
+    if hasattr(result, "markdown_result"):
+        payload = getattr(result, "markdown_result")
+        if payload:
+            return str(payload).strip()
     if hasattr(result, "json_result"):
         payload = getattr(result, "json_result")
         if isinstance(payload, dict) and "text" in payload:
@@ -151,9 +150,7 @@ def _extract_with_http_batch(
     records: List[PageRecord] = []
     for idx, image_path in enumerate(image_paths, start=1):
         payload = {"images": [str(image_path)]}
-        response = requests.post(
-            url, headers=headers, data=json.dumps(payload), timeout=300
-        )
+        response = requests.post(url, headers=headers, json=payload, timeout=300)
         response.raise_for_status()
         data = response.json()
         text = ""
@@ -187,3 +184,19 @@ def _try_add_glmocr_source_to_path() -> None:
         if str(repo_root) not in sys.path:
             sys.path.insert(0, str(repo_root))
             break
+
+
+def _import_glmocr():
+    """Return GlmOcr class if available, otherwise None."""
+    try:
+        from glmocr.api import GlmOcr  # type: ignore[import-not-found]
+
+        return GlmOcr
+    except Exception:
+        _try_add_glmocr_source_to_path()
+        try:
+            from glmocr.api import GlmOcr  # type: ignore[import-not-found]
+
+            return GlmOcr
+        except Exception:
+            return None

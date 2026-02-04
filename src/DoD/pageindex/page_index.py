@@ -37,6 +37,13 @@ from DoD.pageindex.utils import (
 )
 
 
+def _ensure_opt(opt: Any) -> Any:
+    """Ensure a config namespace is available."""
+    if opt is None:
+        return ConfigLoader().load({})
+    return opt
+
+
 def _ensure_list(value: Any, context: str) -> List[Dict[str, Any]]:
     """Ensure a value is a list of dicts."""
     if isinstance(value, list):
@@ -1306,8 +1313,7 @@ async def meta_processor(
 
 async def process_large_node_recursively(node, page_list, opt: Any = None, logger=None):
     """Recursively split large nodes into smaller subtrees."""
-    if opt is None:
-        opt = ConfigLoader().load({})
+    opt = _ensure_opt(opt)
     node_page_list = page_list[node["start_index"] - 1 : node["end_index"]]
     token_num = sum([page[1] for page in node_page_list])
 
@@ -1372,8 +1378,7 @@ async def process_large_node_recursively(node, page_list, opt: Any = None, logge
 
 async def tree_parser(page_list, opt: Any, doc=None, logger=None):
     """Parse a PDF into a hierarchical tree structure."""
-    if opt is None:
-        opt = ConfigLoader().load({})
+    opt = _ensure_opt(opt)
     check_toc_result = check_toc(page_list, opt)
     if logger:
         logger.info(check_toc_result)
@@ -1420,8 +1425,7 @@ async def tree_parser(page_list, opt: Any, doc=None, logger=None):
 def page_index_main(doc, opt: Any = None):
     """Run PageIndex on a PDF path or BytesIO."""
     logger = JsonLogger(doc)
-    if opt is None:
-        opt = ConfigLoader().load({})
+    opt = _ensure_opt(opt)
 
     is_valid_pdf = (
         isinstance(doc, str) and os.path.isfile(doc) and doc.lower().endswith(".pdf")
