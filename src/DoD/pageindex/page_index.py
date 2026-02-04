@@ -44,6 +44,21 @@ def _ensure_opt(opt: Any) -> Any:
     return opt
 
 
+def _build_token_prefix(page_list: List[tuple[str, int]]) -> List[int]:
+    """Build prefix sums for page token counts."""
+    prefix = [0]
+    running = 0
+    for _, tokens in page_list:
+        running += tokens
+        prefix.append(running)
+    return prefix
+
+
+def _range_token_sum(prefix: List[int], start_index: int, end_index: int) -> int:
+    """Return inclusive token sum for [start_index, end_index] (1-based)."""
+    return prefix[end_index] - prefix[start_index - 1]
+
+
 def _ensure_list(value: Any, context: str) -> List[Dict[str, Any]]:
     """Ensure a value is a list of dicts."""
     if isinstance(value, list):
@@ -1311,11 +1326,13 @@ async def meta_processor(
             raise Exception("Processing failed")
 
 
-async def process_large_node_recursively(node, page_list, opt: Any = None, logger=None):
+async def process_large_node_recursively(
+    node, page_list, token_prefix: List[int], opt: Any = None, logger=None
+):
     """Recursively split large nodes into smaller subtrees."""
     opt = _ensure_opt(opt)
     node_page_list = page_list[node["start_index"] - 1 : node["end_index"]]
-    token_num = sum([page[1] for page in node_page_list])
+    token_num = _range_token_sum(token_prefix, node["start_index"], node["end_index"])
 
     if (
         node["end_index"] - node["start_index"] > opt.max_page_num_each_node
@@ -1368,7 +1385,9 @@ async def process_large_node_recursively(node, page_list, opt: Any = None, logge
 
     if "nodes" in node and node["nodes"]:
         tasks = [
-            process_large_node_recursively(child_node, page_list, opt, logger=logger)
+            process_large_node_recursively(
+                child_node, page_list, token_prefix, opt, logger=logger
+            )
             for child_node in node["nodes"]
         ]
         await asyncio.gather(*tasks)
@@ -1376,9 +1395,13 @@ async def process_large_node_recursively(node, page_list, opt: Any = None, logge
     return node
 
 
-async def tree_parser(page_list, opt: Any, doc=None, logger=None):
+async def tree_parser(
+    page_list, opt: Any, doc=None, logger=None, token_prefix: Optional[List[int]] = None
+):
     """Parse a PDF into a hierarchical tree structure."""
     opt = _ensure_opt(opt)
+    if token_prefix is None:
+        token_prefix = _build_token_prefix(page_list)
     check_toc_result = check_toc(page_list, opt)
     if logger:
         logger.info(check_toc_result)
@@ -1414,7 +1437,9 @@ async def tree_parser(page_list, opt: Any, doc=None, logger=None):
 
     toc_tree = post_processing(valid_toc_items, len(page_list))
     tasks = [
-        process_large_node_recursively(node, page_list, opt, logger=logger)
+        process_large_node_recursively(
+            node, page_list, token_prefix, opt, logger=logger
+        )
         for node in toc_tree
     ]
     await asyncio.gather(*tasks)
@@ -1442,7 +1467,10 @@ def page_index_main(doc, opt: Any = None):
     logger.info({"total_token": sum([page[1] for page in page_list])})
 
     async def page_index_builder():
-        structure = await tree_parser(page_list, opt, doc=doc, logger=logger)
+        token_prefix = _build_token_prefix(page_list)
+        structure = await tree_parser(
+            page_list, opt, doc=doc, logger=logger, token_prefix=token_prefix
+        )
         if opt.if_add_node_id == "yes":
             write_node_id(structure)
         if opt.if_add_node_text == "yes":
@@ -1520,7 +1548,10 @@ def page_index_from_page_list(
     logger = JsonLogger(doc_name)
 
     async def page_index_builder():
-        structure = await tree_parser(page_list, opt, doc=None, logger=logger)
+        token_prefix = _build_token_prefix(page_list)
+        structure = await tree_parser(
+            page_list, opt, doc=None, logger=logger, token_prefix=token_prefix
+        )
         if opt.if_add_node_id == "yes":
             write_node_id(structure)
         if opt.if_add_node_text == "yes":

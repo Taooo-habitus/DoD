@@ -579,20 +579,20 @@ def get_text_of_pdf_pages(
     pdf_pages: List[tuple[str, int]], start_page: int, end_page: int
 ) -> str:
     """Return concatenated text for a page range."""
-    text = ""
-    for page_num in range(start_page - 1, end_page):
-        text += pdf_pages[page_num][0]
-    return text
+    chunks = [pdf_pages[page_num][0] for page_num in range(start_page - 1, end_page)]
+    return "".join(chunks)
 
 
 def get_text_of_pdf_pages_with_labels(
     pdf_pages: List[tuple[str, int]], start_page: int, end_page: int
 ) -> str:
     """Return labeled text blocks for a page range."""
-    text = ""
+    chunks = []
     for page_num in range(start_page - 1, end_page):
-        text += f"<physical_index_{page_num + 1}>\n{pdf_pages[page_num][0]}\n<physical_index_{page_num + 1}>\n"
-    return text
+        chunks.append(
+            f"<physical_index_{page_num + 1}>\n{pdf_pages[page_num][0]}\n<physical_index_{page_num + 1}>\n"
+        )
+    return "".join(chunks)
 
 
 def get_number_of_pages(pdf_path: str | BytesIO) -> int:
