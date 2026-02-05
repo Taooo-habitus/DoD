@@ -36,6 +36,7 @@ class OcrConfig:
     ollama_timeout: int = 300
     ollama_api_path: str = "/api/chat"
     ollama_max_long_edge: Optional[int] = 1600
+    ollama_concurrent_requests: int = 1
 
 
 @dataclass

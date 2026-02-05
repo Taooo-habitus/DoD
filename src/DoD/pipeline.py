@@ -114,6 +114,7 @@ def _select_extractor(cfg: PipelineConfig, input_path: Path):
             timeout=cfg.ocr.ollama_timeout,
             api_path=cfg.ocr.ollama_api_path,
             max_long_edge=cfg.ocr.ollama_max_long_edge,
+            concurrent_requests=cfg.ocr.ollama_concurrent_requests,
         )
 
     raise ValueError(f"Unsupported OCR backend: {cfg.ocr.backend}")

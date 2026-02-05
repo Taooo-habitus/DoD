@@ -150,6 +150,7 @@ uv run python -m scripts.main \
   ocr.ollama_host=http://localhost:11434 \
   ocr.ollama_api_path=/api/chat \
   ocr.ollama_max_long_edge=1600 \
+  ocr.ollama_concurrent_requests=4 \
   toc.backend=pageindex \
   toc.model=claude-sonnet-4-5
 ```

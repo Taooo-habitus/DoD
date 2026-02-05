@@ -29,6 +29,7 @@ ocr:
   ollama_timeout: 300
   ollama_api_path: "/api/chat"
   ollama_max_long_edge: 1600
+  ollama_concurrent_requests: 1
 
 page_table:
   include_metadata: true
