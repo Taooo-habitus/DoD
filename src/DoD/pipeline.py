@@ -14,13 +14,14 @@ from omegaconf import OmegaConf
 from DoD.config import PipelineConfig
 from DoD.io.artifacts import write_json
 from DoD.normalize.normalize import normalize_to_images
-from DoD.ocr.base import TextExtractor
-from DoD.ocr.dummy import DummyExtractor
-from DoD.ocr.glm_ocr import GlmOcrExtractor
-from DoD.ocr.glm_ocr_transformers import GlmOcrTransformersExtractor
-from DoD.ocr.ollama_ocr import OllamaOcrExtractor
-from DoD.ocr.plain_text import PlainTextExtractor
 from DoD.page_table import PageRecord, write_image_page_table, write_page_table
+from DoD.text_extractor.base import TextExtractor
+from DoD.text_extractor.dummy import DummyExtractor
+from DoD.text_extractor.glm_ocr import GlmOcrExtractor
+from DoD.text_extractor.glm_ocr_transformers import GlmOcrTransformersExtractor
+from DoD.text_extractor.ollama_ocr import OllamaOcrExtractor
+from DoD.text_extractor.plain_text import PlainTextExtractor
+from DoD.text_extractor.pymupdf import PyMuPDFExtractor
 from DoD.toc.pageindex_adapter import PageIndexAdapter, fallback_toc
 
 logger = logging.getLogger(__name__)
@@ -86,6 +87,9 @@ def _select_extractor(cfg: PipelineConfig, input_path: Path):
     if backend == "dummy":
         return DummyExtractor()
 
+    if backend in {"pymupdf", "pymupdf4llm"}:
+        return PyMuPDFExtractor()
+
     if backend == "glm_ocr":
         return GlmOcrExtractor(
             batch_size=cfg.ocr.batch_size,
@@ -128,8 +132,8 @@ def _generate_toc(
             toc_config = cast(Dict[str, Any], raw_config)
             adapter = PageIndexAdapter(config=toc_config)
             return adapter.generate(input_path, page_records=page_records)
-        except RuntimeError as exc:
-            logger.warning("PageIndex unavailable, using fallback TOC. %s", exc)
+        except Exception as exc:  # noqa: BLE001 - fallback on any PageIndex failure
+            logger.warning("PageIndex failed, using fallback TOC. %s", exc)
 
     return fallback_toc(total_pages=len(page_records))
 

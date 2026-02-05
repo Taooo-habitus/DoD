@@ -14,7 +14,7 @@ page table, and then generates a structural tree using PageIndex.
 - `src/DoD/cli/` — CLI entrypoint
 - `src/DoD/pipeline.py` — end-to-end pipeline orchestration
 - `src/DoD/normalize/` — PDF/image normalization to per-page images
-- `src/DoD/ocr/` — OCR backends
+- `src/DoD/text_extractor/` — OCR/text extraction backends
 - `src/DoD/page_table.py` — page table data model + writer
 - `src/DoD/pageindex/` — PageIndex TOC builder
 - `src/DoD/toc/` — TOC adapters
@@ -39,6 +39,7 @@ openai       - PageIndex LLM calls
 tiktoken     - token counting in PageIndex
 PyPDF2       - PDF text extraction (PageIndex)
 pymupdf      - optional PDF parser (PageIndex)
+pymupdf4llm  - PyMuPDF text extraction backend
 pdf2image    - PDF normalization to images (requires poppler)
 glmocr       - GLM-OCR SDK backend (requires a model server or MaaS)
 transformers - GLM-OCR Transformers backend (requires torch)
@@ -149,6 +150,20 @@ uv run python -m scripts.main \
   ocr.ollama_host=http://localhost:11434 \
   ocr.ollama_api_path=/api/chat \
   ocr.ollama_max_long_edge=1600 \
+  toc.backend=pageindex \
+  toc.model=claude-sonnet-4-5
+```
+
+### 5) PyMuPDF (`ocr.backend=pymupdf`)
+
+Extracts text directly from PDFs with PyMuPDF (via `pymupdf4llm`), while still
+keeping normalized page images for downstream encoding.
+
+```bash
+uv pip install pymupdf4llm
+uv run python -m scripts.main \
+  input_path=examples/Paa-vej-til-dansk.pdf \
+  ocr.backend=pymupdf \
   toc.backend=pageindex \
   toc.model=claude-sonnet-4-5
 ```

@@ -24,6 +24,7 @@ ocr = [
     "transformers>=4.40.0",
     "torch>=2.2.0",
     "glmocr @ git+https://github.com/zai-org/GLM-OCR.git",
+    "pymupdf4llm",
     "requests>=2.32.0",
 ]
 pdf = [

@@ -6,8 +6,8 @@ import sys
 from pathlib import Path
 from typing import Any, Callable, List, Optional, Protocol, cast
 
-from DoD.ocr.base import TextExtractor
 from DoD.page_table import PageRecord
+from DoD.text_extractor.base import TextExtractor
 
 
 class GlmOcrExtractor(TextExtractor):

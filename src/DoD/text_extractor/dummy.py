@@ -5,8 +5,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import List, Optional
 
-from DoD.ocr.base import TextExtractor
 from DoD.page_table import PageRecord
+from DoD.text_extractor.base import TextExtractor
 
 
 class DummyExtractor(TextExtractor):
