@@ -4,6 +4,7 @@ DoD turns documents into two artifacts:
 
 1. `page_table.jsonl` — page-level text + metadata
 2. `toc_tree.json` — hierarchical TOC tree
+3. `image_page_table.jsonl` — page images encoded as base64
 
 The pipeline normalizes documents into images, runs OCR/text extraction, builds a
 page table, and then generates a structural tree using PageIndex.

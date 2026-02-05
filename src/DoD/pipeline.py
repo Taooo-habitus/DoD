@@ -20,7 +20,7 @@ from DoD.ocr.glm_ocr import GlmOcrExtractor
 from DoD.ocr.glm_ocr_transformers import GlmOcrTransformersExtractor
 from DoD.ocr.ollama_ocr import OllamaOcrExtractor
 from DoD.ocr.plain_text import PlainTextExtractor
-from DoD.page_table import PageRecord, write_page_table
+from DoD.page_table import PageRecord, write_image_page_table, write_page_table
 from DoD.toc.pageindex_adapter import PageIndexAdapter, fallback_toc
 
 logger = logging.getLogger(__name__)
@@ -36,7 +36,9 @@ def digest_document(cfg: PipelineConfig) -> Dict[str, str]:
     logger.info("Extracted %s pages.", len(page_records))
 
     toc_tree = _generate_toc(cfg, input_path, page_records)
-    return _write_artifacts(cfg, input_path, output_dir, page_records, toc_tree)
+    return _write_artifacts(
+        cfg, input_path, output_dir, page_records, toc_tree, image_paths
+    )
 
 
 def _resolve_input_path(input_path: str) -> Path:
@@ -138,9 +140,14 @@ def _write_artifacts(
     output_dir: Path,
     page_records: List[PageRecord],
     toc_tree: Dict[str, object],
+    image_paths: Optional[List[Path]],
 ) -> Dict[str, str]:
     page_table_path = output_dir / cfg.artifacts.page_table_filename
     write_page_table(page_table_path, page_records)
+
+    image_page_table_path = output_dir / cfg.artifacts.image_page_table_filename
+    if image_paths:
+        write_image_page_table(image_page_table_path, image_paths)
 
     toc_path = output_dir / cfg.artifacts.toc_filename
     write_json(toc_path, toc_tree)
@@ -151,7 +158,11 @@ def _write_artifacts(
     manifest = {
         "input_path": str(input_path),
         "page_count": len(page_records),
-        "artifacts": {"page_table": str(page_table_path), "toc_tree": str(toc_path)},
+        "artifacts": {
+            "page_table": str(page_table_path),
+            "image_page_table": str(image_page_table_path),
+            "toc_tree": str(toc_path),
+        },
         "config": config_payload,
     }
     manifest_path = output_dir / cfg.artifacts.manifest_filename

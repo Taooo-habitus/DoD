@@ -68,6 +68,7 @@ class ArtifactConfig:
 
     output_dir: str = "artifacts"
     page_table_filename: str = "page_table.jsonl"
+    image_page_table_filename: str = "image_page_table.jsonl"
     toc_filename: str = "toc_tree.json"
     manifest_filename: str = "manifest.json"
 

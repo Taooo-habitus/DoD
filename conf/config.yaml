@@ -49,5 +49,6 @@ toc:
 artifacts:
   output_dir: "artifacts"
   page_table_filename: "page_table.jsonl"
+  image_page_table_filename: "image_page_table.jsonl"
   toc_filename: "toc_tree.json"
   manifest_filename: "manifest.json"

@@ -1,7 +1,7 @@
 [project]
 name = "DoD"
 version = "0.1.0"
-description = "Document Digestion Layer."
+description = "Document Outline Discovery."
 authors = [
     { name = "Tao Tang", email = "ttan@habitus.dk" }
 ]
