@@ -50,6 +50,48 @@ tqdm         - text extraction progress bars
 uv run python -m scripts.main input_path=path/to/document.pdf
 ```
 
+## Server Mode
+
+Run as an API server (supports multiple concurrent PDF jobs):
+
+```bash
+uv pip install -e ".[server]"
+uv run python -m scripts.server
+```
+
+Environment variables:
+
+```text
+DOD_SERVER_HOST=0.0.0.0
+DOD_SERVER_PORT=8000
+DOD_SERVER_MAX_CONCURRENT_DOCS=2
+DOD_SERVER_WORK_DIR=outputs/server_jobs
+```
+
+Submit a PDF (wait for result by default):
+
+```bash
+curl -X POST "http://localhost:8000/v1/digest" \
+  -F "file=@examples/Paa-vej-til-dansk.pdf" \
+  -F "toc_model=gpt-4o-mini" \
+  -F "toc_concurrent_requests=4"
+```
+
+Submit async (`wait=false`), then poll:
+
+```bash
+curl -X POST "http://localhost:8000/v1/digest?wait=false" \
+  -F "file=@examples/Paa-vej-til-dansk.pdf"
+curl "http://localhost:8000/v1/jobs/<job_id>"
+curl "http://localhost:8000/v1/jobs/<job_id>/result"
+```
+
+Result payload includes:
+
+1. `toc_tree` (JSON)
+2. `page_table` (JSONL parsed to JSON array)
+3. `image_page_table` (JSONL parsed to JSON array)
+
 Artifacts are written under:
 
 ```

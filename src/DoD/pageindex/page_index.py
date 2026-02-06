@@ -32,7 +32,7 @@ from DoD.pageindex.utils import (
     get_pdf_name,
     post_processing,
     remove_structure_text,
-    set_openai_config,
+    request_openai_config,
     write_node_id,
 )
 
@@ -1602,9 +1602,8 @@ def page_index(
         if arg != "doc" and value is not None
     }
     opt = ConfigLoader().load(user_opt)
-    if api_key or api_base_url:
-        set_openai_config(api_key=api_key, base_url=api_base_url)
-    return page_index_main(doc, opt)
+    with request_openai_config(api_key=api_key, base_url=api_base_url):
+        return page_index_main(doc, opt)
 
 
 def page_index_from_page_list(
@@ -1629,8 +1628,6 @@ def page_index_from_page_list(
         if arg not in {"page_list", "doc_name"} and value is not None
     }
     opt = ConfigLoader().load(user_opt)
-    if api_key or api_base_url:
-        set_openai_config(api_key=api_key, base_url=api_base_url)
     logger = JsonLogger(doc_name)
 
     async def page_index_builder():
@@ -1660,7 +1657,8 @@ def page_index_from_page_list(
                 }
         return {"doc_name": doc_name, "structure": structure}
 
-    return asyncio.run(page_index_builder())
+    with request_openai_config(api_key=api_key, base_url=api_base_url):
+        return asyncio.run(page_index_builder())
 
 
 def validate_and_truncate_physical_indices(

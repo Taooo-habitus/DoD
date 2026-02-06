@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
+import contextvars
 import copy
 import importlib
 import json
@@ -26,6 +28,12 @@ DEFAULT_API_KEY = (
 DEFAULT_BASE_URL = os.getenv("PAGEINDEX_BASE_URL") or os.getenv("OPENAI_BASE_URL")
 _OPENAI_CLIENT_CACHE: Dict[tuple[Optional[str], Optional[str]], Any] = {}
 _OPENAI_ASYNC_CLIENT_CACHE: Dict[tuple[Optional[str], Optional[str]], Any] = {}
+_REQUEST_API_KEY: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar(
+    "request_api_key", default=None
+)
+_REQUEST_BASE_URL: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar(
+    "request_base_url", default=None
+)
 
 
 def set_openai_config(api_key: Optional[str] = None, base_url: Optional[str] = None):
@@ -39,16 +47,41 @@ def set_openai_config(api_key: Optional[str] = None, base_url: Optional[str] = N
     _OPENAI_ASYNC_CLIENT_CACHE.clear()
 
 
+@contextlib.contextmanager
+def request_openai_config(
+    api_key: Optional[str] = None, base_url: Optional[str] = None
+):
+    """Temporarily set per-request OpenAI-compatible settings."""
+    token_api_key = _REQUEST_API_KEY.set(api_key)
+    normalized_base_url = (
+        base_url.rstrip("/") if isinstance(base_url, str) else base_url
+    )
+    token_base_url = _REQUEST_BASE_URL.set(normalized_base_url)
+    try:
+        yield
+    finally:
+        _REQUEST_API_KEY.reset(token_api_key)
+        _REQUEST_BASE_URL.reset(token_base_url)
+
+
 def _resolve_api_key(api_key: Optional[str]) -> str:
     """Resolve API key for OpenAI-compatible SDK clients."""
-    resolved_api_key = api_key if api_key is not None else DEFAULT_API_KEY
+    resolved_api_key = api_key
+    if resolved_api_key is None:
+        resolved_api_key = _REQUEST_API_KEY.get()
+    if resolved_api_key is None:
+        resolved_api_key = DEFAULT_API_KEY
     # Some OpenAI-compatible endpoints do not require auth, but the SDK expects a key.
     return resolved_api_key or "EMPTY"
 
 
 def _resolve_base_url(base_url: Optional[str]) -> Optional[str]:
     """Resolve and normalize OpenAI-compatible base URL."""
-    resolved_base_url = base_url if base_url is not None else DEFAULT_BASE_URL
+    resolved_base_url = base_url
+    if resolved_base_url is None:
+        resolved_base_url = _REQUEST_BASE_URL.get()
+    if resolved_base_url is None:
+        resolved_base_url = DEFAULT_BASE_URL
     if isinstance(resolved_base_url, str):
         return resolved_base_url.rstrip("/")
     return resolved_base_url

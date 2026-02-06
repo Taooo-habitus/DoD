@@ -24,12 +24,17 @@ text_extractor = [
     "pymupdf>=1.24.0",
     "pymupdf4llm",
 ]
+server = [
+    "fastapi>=0.116.0",
+    "python-multipart>=0.0.20",
+    "uvicorn>=0.35.0",
+]
 pdf = [
     "pdf2image>=1.17.0",
 ]
 
-[tool.uv]
-dev-dependencies = [
+[dependency-groups]
+dev = [
     "mkapi>=4.0.0",
     "mkdocs>=1.6.1",
     "mkdocs-include-dir-to-nav>=1.2.0",

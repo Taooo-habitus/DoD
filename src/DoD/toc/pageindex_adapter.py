@@ -28,16 +28,12 @@ class PageIndexAdapter:
     def _generate_from_pdf(self, input_path: Path) -> Dict[str, Any]:
         try:
             from DoD.pageindex import page_index
-            from DoD.pageindex.utils import set_openai_config
         except ImportError as exc:
             raise RuntimeError(
                 "DoD.pageindex is required for TOC generation. Ensure PageIndex "
                 "code is available in src/DoD/pageindex."
             ) from exc
 
-        set_openai_config(
-            api_key=self.config.get("api_key"), base_url=self.config.get("api_base_url")
-        )
         return page_index(
             doc=str(input_path),
             model=self.config["model"],
@@ -58,28 +54,28 @@ class PageIndexAdapter:
             import asyncio
 
             from DoD.pageindex.page_index_md import md_to_tree
-            from DoD.pageindex.utils import set_openai_config
+            from DoD.pageindex.utils import request_openai_config
         except ImportError as exc:
             raise RuntimeError(
                 "DoD.pageindex is required for Markdown TOC generation."
             ) from exc
 
-        set_openai_config(
+        with request_openai_config(
             api_key=self.config.get("api_key"), base_url=self.config.get("api_base_url")
-        )
-        return asyncio.run(
-            md_to_tree(
-                md_path=str(input_path),
-                model=self.config["model"],
-                if_thinning=True,
-                min_token_threshold=5000,
-                if_add_node_summary=self.config["if_add_node_summary"],
-                summary_token_threshold=200,
-                if_add_doc_description=self.config["if_add_doc_description"],
-                if_add_node_text=self.config["if_add_node_text"],
-                if_add_node_id=self.config["if_add_node_id"],
+        ):
+            return asyncio.run(
+                md_to_tree(
+                    md_path=str(input_path),
+                    model=self.config["model"],
+                    if_thinning=True,
+                    min_token_threshold=5000,
+                    if_add_node_summary=self.config["if_add_node_summary"],
+                    summary_token_threshold=200,
+                    if_add_doc_description=self.config["if_add_doc_description"],
+                    if_add_node_text=self.config["if_add_node_text"],
+                    if_add_node_id=self.config["if_add_node_id"],
+                )
             )
-        )
 
     def _generate_from_page_records(
         self, input_path: Path, page_records: List[PageRecord]
