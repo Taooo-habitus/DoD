@@ -35,6 +35,7 @@ class TocConfig:
 
     backend: str = "pageindex"
     model: str = "gpt-4o-2024-11-20"
+    concurrent_requests: int = 4
     api_key: Optional[str] = None
     api_base_url: Optional[str] = None
     toc_check_page_num: int = 20

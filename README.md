@@ -65,6 +65,7 @@ uv run python -m scripts.main \
   input_path=path/to/document.pdf \
   text_extractor.backend=pymupdf \
   toc.backend=pageindex \
+  toc.concurrent_requests=4 \
   toc.model=gpt-4o-mini
 ```
 

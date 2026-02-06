@@ -41,6 +41,7 @@ class PageIndexAdapter:
         return page_index(
             doc=str(input_path),
             model=self.config["model"],
+            concurrent_requests=self.config.get("concurrent_requests", 4),
             toc_check_page_num=self.config["toc_check_page_num"],
             max_page_num_each_node=self.config["max_page_num_each_node"],
             max_token_num_each_node=self.config["max_token_num_each_node"],
@@ -99,6 +100,7 @@ class PageIndexAdapter:
             page_list,
             doc_name=input_path.stem,
             model=self.config["model"],
+            concurrent_requests=self.config.get("concurrent_requests", 4),
             toc_check_page_num=self.config["toc_check_page_num"],
             max_page_num_each_node=self.config["max_page_num_each_node"],
             max_token_num_each_node=self.config["max_token_num_each_node"],

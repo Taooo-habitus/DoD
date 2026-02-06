@@ -205,9 +205,54 @@ def toc_detector_single_page(content: str, model: Optional[str] = None) -> str:
     Please note: abstract,summary, notation list, figure list, table list, etc. are not table of contents."""
 
     response = ChatGPT_API(model=model, prompt=prompt)
-    # print('response', response)
     json_content = extract_json(response)
-    return json_content["toc_detected"]
+    return json_content.get("toc_detected", "no")
+
+
+async def toc_detector_single_page_async(
+    content: str, model: Optional[str] = None
+) -> str:
+    """Detect whether a page contains a table of contents asynchronously."""
+    prompt = f"""
+    Your job is to detect if there is a table of content provided in the given text.
+
+    Given text: {content}
+
+    return the following JSON format:
+    {{
+        "thinking": <why do you think there is a table of content in the given text>
+        "toc_detected": "<yes or no>",
+    }}
+
+    Directly return the final JSON structure. Do not output anything else.
+    Please note: abstract,summary, notation list, figure list, table list, etc. are not table of contents."""
+
+    response = await ChatGPT_API_async(model=model, prompt=prompt)
+    json_content = extract_json(response)
+    return json_content.get("toc_detected", "no")
+
+
+async def _detect_toc_for_indices(
+    indices: List[int],
+    page_list: List[tuple[str, int]],
+    model: Optional[str],
+    concurrent_requests: int,
+) -> Dict[int, str]:
+    """Run TOC detection concurrently for a set of page indices."""
+    semaphore = asyncio.Semaphore(max(1, concurrent_requests))
+    results: Dict[int, str] = {}
+
+    async def _detect(index: int) -> None:
+        async with semaphore:
+            try:
+                results[index] = await toc_detector_single_page_async(
+                    page_list[index][0], model=model
+                )
+            except Exception:
+                results[index] = "no"
+
+    await asyncio.gather(*[_detect(index) for index in indices])
+    return results
 
 
 def check_if_toc_extraction_is_complete(
@@ -453,7 +498,7 @@ def toc_transformer(toc_content: str, model: Optional[str] = None) -> Any:
     return cleaned_response
 
 
-def find_toc_pages(
+async def find_toc_pages(
     start_page_index: int,
     page_list: List[tuple[str, int]],
     opt: Any,
@@ -461,15 +506,22 @@ def find_toc_pages(
 ) -> List[int]:
     """Find pages likely containing the table of contents."""
     print("start find_toc_pages")
-    last_page_is_yes = False
-    toc_page_list = []
-    i = start_page_index
+    total_pages = len(page_list)
+    if start_page_index >= total_pages:
+        return []
 
-    while i < len(page_list):
-        # Only check beyond max_pages if we're still finding TOC pages
-        if i >= opt.toc_check_page_num and not last_page_is_yes:
-            break
-        detected_result = toc_detector_single_page(page_list[i][0], model=opt.model)
+    concurrent_requests = max(1, int(getattr(opt, "concurrent_requests", 4)))
+    toc_page_list: List[int] = []
+    last_page_is_yes = False
+
+    initial_end = min(total_pages, max(start_page_index, opt.toc_check_page_num))
+    initial_indices = list(range(start_page_index, initial_end))
+    initial_results = await _detect_toc_for_indices(
+        initial_indices, page_list, opt.model, concurrent_requests
+    )
+
+    for i in initial_indices:
+        detected_result = initial_results.get(i, "no")
         if detected_result == "yes":
             if logger:
                 logger.info(f"Page {i} has toc")
@@ -478,8 +530,35 @@ def find_toc_pages(
         elif detected_result == "no" and last_page_is_yes:
             if logger:
                 logger.info(f"Found the last page with toc: {i - 1}")
-            break
-        i += 1
+            return toc_page_list
+
+    if not last_page_is_yes:
+        if logger:
+            logger.info("No toc found")
+        return toc_page_list
+
+    # Preserve existing behavior: continue scanning after toc_check_page_num
+    # only when we already found contiguous TOC pages.
+    index = initial_end
+    batch_size = max(concurrent_requests, 1)
+    while index < total_pages:
+        batch_end = min(total_pages, index + batch_size)
+        batch_indices = list(range(index, batch_end))
+        batch_results = await _detect_toc_for_indices(
+            batch_indices, page_list, opt.model, concurrent_requests
+        )
+        for i in batch_indices:
+            detected_result = batch_results.get(i, "no")
+            if detected_result == "yes":
+                if logger:
+                    logger.info(f"Page {i} has toc")
+                toc_page_list.append(i)
+                last_page_is_yes = True
+            elif detected_result == "no" and last_page_is_yes:
+                if logger:
+                    logger.info(f"Found the last page with toc: {i - 1}")
+                return toc_page_list
+        index = batch_end
 
     if not toc_page_list and logger:
         logger.info("No toc found")
@@ -916,9 +995,13 @@ def process_none_page_numbers(
     return toc_items
 
 
-def check_toc(page_list: List[tuple[str, int]], opt: Any = None) -> Dict[str, Any]:
+async def check_toc(
+    page_list: List[tuple[str, int]], opt: Any = None
+) -> Dict[str, Any]:
     """Detect and parse TOC pages from a document."""
-    toc_page_list = find_toc_pages(start_page_index=0, page_list=page_list, opt=opt)
+    toc_page_list = await find_toc_pages(
+        start_page_index=0, page_list=page_list, opt=opt
+    )
     if len(toc_page_list) == 0:
         print("no toc found")
         return {
@@ -945,7 +1028,7 @@ def check_toc(page_list: List[tuple[str, int]], opt: Any = None) -> Dict[str, An
                 and current_start_index < len(page_list)
                 and current_start_index < opt.toc_check_page_num
             ):
-                additional_toc_pages = find_toc_pages(
+                additional_toc_pages = await find_toc_pages(
                     start_page_index=current_start_index, page_list=page_list, opt=opt
                 )
 
@@ -1403,7 +1486,7 @@ async def tree_parser(
     opt = _ensure_opt(opt)
     if token_prefix is None:
         token_prefix = _build_token_prefix(page_list)
-    check_toc_result = check_toc(page_list, opt)
+    check_toc_result = await check_toc(page_list, opt)
     if logger:
         logger.info(check_toc_result)
 
@@ -1501,6 +1584,7 @@ def page_index_main(doc, opt: Any = None):
 def page_index(
     doc,
     model=None,
+    concurrent_requests=None,
     toc_check_page_num=None,
     max_page_num_each_node=None,
     max_token_num_each_node=None,
@@ -1527,6 +1611,7 @@ def page_index_from_page_list(
     page_list,
     doc_name="document",
     model=None,
+    concurrent_requests=None,
     toc_check_page_num=None,
     max_page_num_each_node=None,
     max_token_num_each_node=None,

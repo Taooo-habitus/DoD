@@ -20,6 +20,7 @@ page_table:
 toc:
   backend: "pageindex"
   model: "gpt-4o-2024-11-20"
+  concurrent_requests: 4
   api_key: null
   api_base_url: null
   toc_check_page_num: 20

@@ -11,6 +11,7 @@ class PageIndexConfig:
     """Configuration values for PageIndex."""
 
     model: str = "gpt-4o-2024-11-20"
+    concurrent_requests: int = 4
     toc_check_page_num: int = 20
     max_page_num_each_node: int = 10
     max_token_num_each_node: int = 20000
@@ -25,6 +26,7 @@ class PageIndexConfig:
         """Return a dict representation of the config."""
         return {
             "model": self.model,
+            "concurrent_requests": self.concurrent_requests,
             "toc_check_page_num": self.toc_check_page_num,
             "max_page_num_each_node": self.max_page_num_each_node,
             "max_token_num_each_node": self.max_token_num_each_node,
