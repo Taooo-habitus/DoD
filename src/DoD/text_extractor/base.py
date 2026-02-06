@@ -1,4 +1,4 @@
-"""OCR / text extraction interface."""
+"""Text extraction interface."""
 
 from __future__ import annotations
 
@@ -15,7 +15,7 @@ class TextExtractor(ABC):
     requires_images: bool = True
 
     @staticmethod
-    def _progress(iterable, total: int | None = None, desc: str = "OCR"):
+    def _progress(iterable, total: int | None = None, desc: str = "Text Extraction"):
         try:
             from tqdm import tqdm
         except ImportError:

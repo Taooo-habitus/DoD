@@ -12,7 +12,7 @@ def test_plain_text_pipeline(tmp_path: Path) -> None:
     text_path.write_text("Hello world", encoding="utf-8")
 
     cfg = PipelineConfig(input_path=str(text_path))
-    cfg.ocr.backend = "plain_text"
+    cfg.text_extractor.backend = "plain_text"
     cfg.toc.backend = "fallback"
     cfg.artifacts.output_dir = str(tmp_path / "artifacts")
 

@@ -284,7 +284,14 @@ def extract_toc_content(content: str, model: Optional[str] = None) -> str:
     response = response + new_response
     if_complete = check_if_toc_transformation_is_complete(content, response, model)
 
+    attempts = 0
+    max_attempts = 5
     while not (if_complete == "yes" and finish_reason == "finished"):
+        attempts += 1
+        if attempts >= max_attempts:
+            raise Exception(
+                "Failed to complete table of contents after maximum retries"
+            )
         chat_history = [
             {"role": "user", "content": prompt},
             {"role": "assistant", "content": response},
@@ -295,12 +302,6 @@ def extract_toc_content(content: str, model: Optional[str] = None) -> str:
         )
         response = response + new_response
         if_complete = check_if_toc_transformation_is_complete(content, response, model)
-
-        # Optional: Add a maximum retry limit to prevent infinite loops
-        if len(chat_history) > 5:  # Arbitrary limit of 10 attempts
-            raise Exception(
-                "Failed to complete table of contents after maximum retries"
-            )
 
     return response
 

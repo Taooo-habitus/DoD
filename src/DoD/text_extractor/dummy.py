@@ -1,4 +1,4 @@
-"""Dummy OCR backend for testing without dependencies."""
+"""Dummy text extraction backend for testing without dependencies."""
 
 from __future__ import annotations
 

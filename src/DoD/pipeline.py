@@ -17,9 +17,6 @@ from DoD.normalize.normalize import normalize_to_images
 from DoD.page_table import PageRecord, write_image_page_table, write_page_table
 from DoD.text_extractor.base import TextExtractor
 from DoD.text_extractor.dummy import DummyExtractor
-from DoD.text_extractor.glm_ocr import GlmOcrExtractor
-from DoD.text_extractor.glm_ocr_transformers import GlmOcrTransformersExtractor
-from DoD.text_extractor.ollama_ocr import OllamaOcrExtractor
 from DoD.text_extractor.plain_text import PlainTextExtractor
 from DoD.text_extractor.pymupdf import PyMuPDFExtractor
 from DoD.toc.pageindex_adapter import PageIndexAdapter, fallback_toc
@@ -79,9 +76,10 @@ def _normalize_if_needed(
 
 
 def _select_extractor(cfg: PipelineConfig, input_path: Path):
-    backend = cfg.ocr.backend.lower()
+    backend = cfg.text_extractor.backend.lower()
+    suffix = input_path.suffix.lower()
 
-    if backend == "plain_text" or input_path.suffix.lower() in {".md", ".txt"}:
+    if suffix in {".md", ".txt"}:
         return PlainTextExtractor()
 
     if backend == "dummy":
@@ -90,34 +88,16 @@ def _select_extractor(cfg: PipelineConfig, input_path: Path):
     if backend in {"pymupdf", "pymupdf4llm"}:
         return PyMuPDFExtractor()
 
-    if backend == "glm_ocr":
-        return GlmOcrExtractor(
-            batch_size=cfg.ocr.batch_size,
-            device=cfg.ocr.device,
-            api_host=cfg.ocr.glmocr_api_host,
-            api_port=cfg.ocr.glmocr_api_port,
-            maas_enabled=cfg.ocr.glmocr_maas_enabled,
-            api_key=cfg.ocr.glmocr_api_key,
-        )
-    if backend == "glm_ocr_transformers":
-        return GlmOcrTransformersExtractor(
-            model_name=cfg.ocr.glmocr_model,
-            prompt=cfg.ocr.glmocr_prompt,
-            device=cfg.ocr.device,
-            max_new_tokens=cfg.ocr.glmocr_max_new_tokens,
-        )
-    if backend == "ollama_ocr":
-        return OllamaOcrExtractor(
-            host=cfg.ocr.ollama_host,
-            model=cfg.ocr.ollama_model,
-            prompt=cfg.ocr.ollama_prompt,
-            timeout=cfg.ocr.ollama_timeout,
-            api_path=cfg.ocr.ollama_api_path,
-            max_long_edge=cfg.ocr.ollama_max_long_edge,
-            concurrent_requests=cfg.ocr.ollama_concurrent_requests,
+    removed_backends = {"glm_ocr", "glm_ocr_transformers", "ollama_ocr"}
+    if backend in removed_backends:
+        raise ValueError(
+            "Text extractor backend "
+            f"'{cfg.text_extractor.backend}' has been removed. Use 'pymupdf'."
         )
 
-    raise ValueError(f"Unsupported OCR backend: {cfg.ocr.backend}")
+    raise ValueError(
+        f"Unsupported text extractor backend: {cfg.text_extractor.backend}"
+    )
 
 
 def _generate_toc(

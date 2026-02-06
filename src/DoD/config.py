@@ -16,27 +16,10 @@ class NormalizeConfig:
 
 
 @dataclass
-class OcrConfig:
-    """Settings for OCR / text extraction."""
+class TextExtractorConfig:
+    """Settings for text extraction."""
 
-    backend: str = "glm_ocr"
-    batch_size: int = 1
-    language_hint: Optional[str] = None
-    device: Optional[str] = None
-    glmocr_model: str = "zai-org/GLM-OCR"
-    glmocr_prompt: str = "Text Recognition:"
-    glmocr_max_new_tokens: int = 4096
-    glmocr_api_host: Optional[str] = None
-    glmocr_api_port: Optional[int] = None
-    glmocr_maas_enabled: Optional[bool] = None
-    glmocr_api_key: Optional[str] = None
-    ollama_host: str = "http://localhost:11434"
-    ollama_model: str = "glm-ocr:q8_0"
-    ollama_prompt: str = "Recognize the text in the image and output in Markdown."
-    ollama_timeout: int = 300
-    ollama_api_path: str = "/api/chat"
-    ollama_max_long_edge: Optional[int] = 1600
-    ollama_concurrent_requests: int = 1
+    backend: str = "pymupdf"
 
 
 @dataclass
@@ -82,7 +65,7 @@ class PipelineConfig:
     run_mode: str = "dev"
     logging_level: str = "INFO"
     normalize: NormalizeConfig = field(default_factory=NormalizeConfig)
-    ocr: OcrConfig = field(default_factory=OcrConfig)
+    text_extractor: TextExtractorConfig = field(default_factory=TextExtractorConfig)
     page_table: PageTableConfig = field(default_factory=PageTableConfig)
     toc: TocConfig = field(default_factory=TocConfig)
     artifacts: ArtifactConfig = field(default_factory=ArtifactConfig)

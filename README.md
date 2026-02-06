@@ -6,7 +6,7 @@ DoD turns documents into two artifacts:
 2. `toc_tree.json` — hierarchical TOC tree
 3. `image_page_table.jsonl` — page images encoded as base64
 
-The pipeline normalizes documents into images, runs OCR/text extraction, builds a
+The pipeline normalizes documents into images, runs text extraction, builds a
 page table, and then generates a structural tree using PageIndex.
 
 **Project Structure**
@@ -14,7 +14,7 @@ page table, and then generates a structural tree using PageIndex.
 - `src/DoD/cli/` — CLI entrypoint
 - `src/DoD/pipeline.py` — end-to-end pipeline orchestration
 - `src/DoD/normalize/` — PDF/image normalization to per-page images
-- `src/DoD/text_extractor/` — OCR/text extraction backends
+- `src/DoD/text_extractor/` — text extraction backends
 - `src/DoD/page_table.py` — page table data model + writer
 - `src/DoD/pageindex/` — PageIndex TOC builder
 - `src/DoD/toc/` — TOC adapters
@@ -41,11 +41,7 @@ PyPDF2       - PDF text extraction (PageIndex)
 pymupdf      - optional PDF parser (PageIndex)
 pymupdf4llm  - PyMuPDF text extraction backend
 pdf2image    - PDF normalization to images (requires poppler)
-glmocr       - GLM-OCR SDK backend (requires a model server or MaaS)
-transformers - GLM-OCR Transformers backend (requires torch)
-pillow       - image loading for Transformers backend
-requests     - Ollama OCR backend
-tqdm         - OCR progress bars
+tqdm         - text extraction progress bars
 ```
 
 ## Quickstart
@@ -67,95 +63,18 @@ Edit `conf/config.yaml` or override on the command line:
 ```bash
 uv run python -m scripts.main \
   input_path=path/to/document.pdf \
-  ocr.backend=plain_text \
+  text_extractor.backend=pymupdf \
   toc.backend=pageindex \
   toc.model=gpt-4o-mini
 ```
 
-Set your LLM API key via `OPENAI_API_KEY` (or `CHATGPT_API_KEY`). You can also
-pass `toc.api_key=...` and `toc.api_base_url=...` directly.
+Set your LLM API key via `PAGEINDEX_API_KEY` (or `OPENAI_API_KEY` / `CHATGPT_API_KEY`).
+Set endpoint via `PAGEINDEX_BASE_URL` (or `OPENAI_BASE_URL`). You can also pass
+`toc.api_key=...` and `toc.api_base_url=...` directly.
 
-## OCR Backends
+## Text Extraction
 
-### 1) GLM-OCR SDK (`ocr.backend=glm_ocr`)
-
-This uses the GLM-OCR SDK, which expects a model server at
-`/v1/chat/completions` unless you have MaaS access.
-
-```bash
-uv run python -m scripts.main \
-  input_path=examples/Paa-vej-til-dansk.pdf \
-  ocr.backend=glm_ocr \
-  toc.backend=pageindex \
-  toc.model=claude-sonnet-4-5
-```
-
-To point at a remote server:
-
-```bash
-uv run python -m scripts.main \
-  input_path=examples/Paa-vej-til-dansk.pdf \
-  ocr.backend=glm_ocr \
-  ocr.glmocr_api_host=<SERVER_IP> \
-  ocr.glmocr_api_port=8080 \
-  toc.backend=pageindex \
-  toc.model=claude-sonnet-4-5
-```
-
-### 2) GLM-OCR Transformers (`ocr.backend=glm_ocr_transformers`)
-
-Runs the Hugging Face model directly (slow on CPU, works on macOS).
-
-Install:
-
-```bash
-uv pip install git+https://github.com/huggingface/transformers.git torch pillow
-```
-
-Run:
-
-```bash
-uv run python -m scripts.main \
-  input_path=examples/Paa-vej-til-dansk.pdf \
-  ocr.backend=glm_ocr_transformers \
-  ocr.device=cpu \
-  toc.backend=pageindex \
-  toc.model=claude-sonnet-4-5
-```
-
-Limit pages to speed up tests:
-
-```bash
-uv run python -m scripts.main \
-  input_path=examples/Paa-vej-til-dansk.pdf \
-  ocr.backend=glm_ocr_transformers \
-  normalize.max_pages=5 \
-  toc.backend=pageindex \
-  toc.model=claude-sonnet-4-5
-```
-
-### 3) Dummy OCR (`ocr.backend=dummy`)
-
-Runs end-to-end without OCR (empty page text). Useful for wiring tests.
-
-### 4) Ollama OCR (`ocr.backend=ollama_ocr`)
-
-Uses a local Ollama server with a vision-capable model (e.g., `glm-ocr:q8_0`).
-
-```bash
-uv run python -m scripts.main \
-  input_path=examples/Paa-vej-til-dansk.pdf \
-  ocr.backend=ollama_ocr \
-  ocr.ollama_model=glm-ocr:q8_0 \
-  ocr.ollama_host=http://localhost:11434 \
-  ocr.ollama_api_path=/api/chat \
-  ocr.ollama_max_long_edge=1600 \
-  ocr.ollama_concurrent_requests=4 \
-  toc.backend=pageindex \
-  toc.model=claude-sonnet-4-5
-```
-
-### 5) PyMuPDF (`ocr.backend=pymupdf`)
+### PyMuPDF (`text_extractor.backend=pymupdf`)
 
 Extracts text directly from PDFs with PyMuPDF (via `pymupdf4llm`), while still
 keeping normalized page images for downstream encoding.
@@ -164,7 +83,7 @@ keeping normalized page images for downstream encoding.
 uv pip install pymupdf4llm
 uv run python -m scripts.main \
   input_path=examples/Paa-vej-til-dansk.pdf \
-  ocr.backend=pymupdf \
+  text_extractor.backend=pymupdf \
   toc.backend=pageindex \
   toc.model=claude-sonnet-4-5
 ```
@@ -174,8 +93,8 @@ uv run python -m scripts.main \
 Snowflake Cortex provides an OpenAI SDK compatible endpoint. Set:
 
 ```bash
-export OPENAI_API_KEY="<snowflake_pat>"
-export OPENAI_BASE_URL="https://<account-identifier>.snowflakecomputing.com/api/v2/cortex/v1"
+export PAGEINDEX_API_KEY="<snowflake_pat>"
+export PAGEINDEX_BASE_URL="https://<account-identifier>.snowflakecomputing.com/api/v2/cortex/v1"
 ```
 
 Then run with any `toc.model` supported by your Snowflake account:
@@ -183,7 +102,7 @@ Then run with any `toc.model` supported by your Snowflake account:
 ```bash
 uv run python -m scripts.main \
   input_path=examples/Paa-vej-til-dansk.pdf \
-  ocr.backend=glm_ocr_transformers \
+  text_extractor.backend=pymupdf \
   toc.backend=pageindex \
   toc.model=claude-sonnet-4-5
 ```

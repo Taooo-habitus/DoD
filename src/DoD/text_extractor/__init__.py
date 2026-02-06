@@ -1,1 +1,1 @@
-"""OCR/text extraction backends."""
+"""Text extraction backends."""

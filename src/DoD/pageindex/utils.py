@@ -11,23 +11,47 @@ import os
 import re
 import time
 from datetime import datetime
+from functools import lru_cache
 from io import BytesIO
 from types import SimpleNamespace as config
 from typing import Any, Dict, Iterable, List, Optional
 
 from DoD.pageindex.config import DEFAULT_CONFIG
 
-DEFAULT_API_KEY = os.getenv("OPENAI_API_KEY") or os.getenv("CHATGPT_API_KEY")
-DEFAULT_BASE_URL = os.getenv("OPENAI_BASE_URL")
+DEFAULT_API_KEY = (
+    os.getenv("PAGEINDEX_API_KEY")
+    or os.getenv("OPENAI_API_KEY")
+    or os.getenv("CHATGPT_API_KEY")
+)
+DEFAULT_BASE_URL = os.getenv("PAGEINDEX_BASE_URL") or os.getenv("OPENAI_BASE_URL")
+_OPENAI_CLIENT_CACHE: Dict[tuple[Optional[str], Optional[str]], Any] = {}
+_OPENAI_ASYNC_CLIENT_CACHE: Dict[tuple[Optional[str], Optional[str]], Any] = {}
 
 
 def set_openai_config(api_key: Optional[str] = None, base_url: Optional[str] = None):
     """Override default OpenAI-compatible client settings."""
     global DEFAULT_API_KEY, DEFAULT_BASE_URL
-    if api_key:
-        DEFAULT_API_KEY = api_key
-    if base_url:
-        DEFAULT_BASE_URL = base_url
+    if api_key is not None:
+        DEFAULT_API_KEY = api_key or None
+    if base_url is not None:
+        DEFAULT_BASE_URL = base_url.rstrip("/") if base_url else None
+    _OPENAI_CLIENT_CACHE.clear()
+    _OPENAI_ASYNC_CLIENT_CACHE.clear()
+
+
+def _resolve_api_key(api_key: Optional[str]) -> str:
+    """Resolve API key for OpenAI-compatible SDK clients."""
+    resolved_api_key = api_key if api_key is not None else DEFAULT_API_KEY
+    # Some OpenAI-compatible endpoints do not require auth, but the SDK expects a key.
+    return resolved_api_key or "EMPTY"
+
+
+def _resolve_base_url(base_url: Optional[str]) -> Optional[str]:
+    """Resolve and normalize OpenAI-compatible base URL."""
+    resolved_base_url = base_url if base_url is not None else DEFAULT_BASE_URL
+    if isinstance(resolved_base_url, str):
+        return resolved_base_url.rstrip("/")
+    return resolved_base_url
 
 
 def _get_openai_client(api_key: Optional[str] = None, base_url: Optional[str] = None):
@@ -37,11 +61,19 @@ def _get_openai_client(api_key: Optional[str] = None, base_url: Optional[str] = 
     except ImportError as exc:
         raise RuntimeError("openai is required for PageIndex LLM calls.") from exc
 
-    api_key = api_key or DEFAULT_API_KEY
-    base_url = base_url or DEFAULT_BASE_URL
-    if base_url:
-        return openai.OpenAI(api_key=api_key, base_url=base_url)
-    return openai.OpenAI(api_key=api_key)
+    resolved_api_key = _resolve_api_key(api_key)
+    resolved_base_url = _resolve_base_url(base_url)
+    cache_key = (resolved_api_key, resolved_base_url)
+    client = _OPENAI_CLIENT_CACHE.get(cache_key)
+    if client is not None:
+        return client
+
+    if resolved_base_url:
+        client = openai.OpenAI(api_key=resolved_api_key, base_url=resolved_base_url)
+    else:
+        client = openai.OpenAI(api_key=resolved_api_key)
+    _OPENAI_CLIENT_CACHE[cache_key] = client
+    return client
 
 
 def _get_openai_async_client(
@@ -53,11 +85,42 @@ def _get_openai_async_client(
     except ImportError as exc:
         raise RuntimeError("openai is required for PageIndex LLM calls.") from exc
 
-    api_key = api_key or DEFAULT_API_KEY
-    base_url = base_url or DEFAULT_BASE_URL
-    if base_url:
-        return openai.AsyncOpenAI(api_key=api_key, base_url=base_url)
-    return openai.AsyncOpenAI(api_key=api_key)
+    resolved_api_key = _resolve_api_key(api_key)
+    resolved_base_url = _resolve_base_url(base_url)
+    cache_key = (resolved_api_key, resolved_base_url)
+    client = _OPENAI_ASYNC_CLIENT_CACHE.get(cache_key)
+    if client is not None:
+        return client
+
+    if resolved_base_url:
+        client = openai.AsyncOpenAI(
+            api_key=resolved_api_key, base_url=resolved_base_url
+        )
+    else:
+        client = openai.AsyncOpenAI(api_key=resolved_api_key)
+    _OPENAI_ASYNC_CLIENT_CACHE[cache_key] = client
+    return client
+
+
+@lru_cache(maxsize=1)
+def _require_tiktoken():
+    """Import and cache the tiktoken module."""
+    try:
+        return importlib.import_module("tiktoken")
+    except ImportError as exc:
+        raise RuntimeError("tiktoken is required for token counting.") from exc
+
+
+@lru_cache(maxsize=64)
+def _get_encoding_for_model(model: Optional[str]):
+    """Return a cached tokenizer encoding."""
+    tiktoken = _require_tiktoken()
+    if model:
+        try:
+            return tiktoken.encoding_for_model(model)
+        except KeyError:
+            return tiktoken.get_encoding("cl100k_base")
+    return tiktoken.get_encoding("cl100k_base")
 
 
 def _require_pypdf2():
@@ -78,17 +141,7 @@ def count_tokens(text: str, model: Optional[str] = None) -> int:
     """Count tokens for the given text with the model's tokenizer."""
     if not text:
         return 0
-    try:
-        tiktoken = importlib.import_module("tiktoken")
-    except ImportError as exc:
-        raise RuntimeError("tiktoken is required for token counting.") from exc
-    if model:
-        try:
-            enc = tiktoken.encoding_for_model(model)
-        except KeyError:
-            enc = tiktoken.get_encoding("cl100k_base")
-    else:
-        enc = tiktoken.get_encoding("cl100k_base")
+    enc = _get_encoding_for_model(model)
     tokens = enc.encode(text)
     return len(tokens)
 
@@ -108,8 +161,7 @@ def ChatGPT_API_with_finish_reason(
     for i in range(max_retries):
         try:
             if chat_history:
-                messages = chat_history
-                messages.append({"role": "user", "content": prompt})
+                messages = [*chat_history, {"role": "user", "content": prompt}]
             else:
                 messages = [{"role": "user", "content": prompt}]
 
@@ -146,8 +198,7 @@ def ChatGPT_API(
     for i in range(max_retries):
         try:
             if chat_history:
-                messages = chat_history
-                messages.append({"role": "user", "content": prompt})
+                messages = [*chat_history, {"role": "user", "content": prompt}]
             else:
                 messages = [{"role": "user", "content": prompt}]
 
@@ -177,15 +228,13 @@ async def ChatGPT_API_async(
         raise ValueError("model is required for LLM calls.")
     max_retries = 10
     messages = [{"role": "user", "content": prompt}]
+    client = _get_openai_async_client(api_key=api_key, base_url=api_base_url)
     for i in range(max_retries):
         try:
-            async with _get_openai_async_client(
-                api_key=api_key, base_url=api_base_url
-            ) as client:
-                response = await client.chat.completions.create(
-                    model=model, messages=messages, temperature=0
-                )
-                return response.choices[0].message.content
+            response = await client.chat.completions.create(
+                model=model, messages=messages, temperature=0
+            )
+            return response.choices[0].message.content
         except Exception as exc:
             logging.error("Retrying async LLM call after error: %s", exc)
             if i < max_retries - 1:
@@ -545,12 +594,7 @@ def get_page_tokens(
     pdf_parser: str = "PyPDF2",
 ) -> List[tuple[str, int]]:
     """Extract (page_text, token_count) pairs from a PDF."""
-    try:
-        tiktoken = importlib.import_module("tiktoken")
-    except ImportError as exc:
-        raise RuntimeError("tiktoken is required for token counting.") from exc
-
-    enc = tiktoken.encoding_for_model(model)
+    enc = _get_encoding_for_model(model)
     if pdf_parser == "PyPDF2":
         pdf_reader = _require_pypdf2().PdfReader(pdf_path)
         page_list = []

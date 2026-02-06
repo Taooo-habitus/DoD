@@ -28,7 +28,7 @@ class PyMuPDFExtractor(TextExtractor):
             ) from exc
 
         try:
-            import fitz  # type: ignore[import-not-found]
+            import fitz
         except ImportError as exc:
             raise RuntimeError(
                 "PyMuPDF (fitz) is required for the PyMuPDF text extractor. "
