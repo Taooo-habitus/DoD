@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any, cast
+from typing import cast
 
 import pytest
 
@@ -105,10 +105,10 @@ def test_normalize_if_needed(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) ->
     )
 
 
-def test_generate_toc_fallback_on_adapter_failure(
+def test_generate_toc_raises_on_adapter_failure(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """TOC generation should fallback if PageIndex adapter fails."""
+    """TOC generation should fail in strict mode if PageIndex adapter fails."""
     cfg = PipelineConfig(input_path=str(tmp_path / "doc.pdf"))
     cfg.toc.backend = "pageindex"
     page_records = [PageRecord(page_id=1, text="hello")]
@@ -121,11 +121,18 @@ def test_generate_toc_fallback_on_adapter_failure(
             raise RuntimeError("boom")
 
     monkeypatch.setattr(pipeline, "PageIndexAdapter", FailingAdapter)
-    toc = pipeline._generate_toc(cfg, tmp_path / "doc.pdf", page_records)
-    structure = cast(list[dict[str, Any]], toc["structure"])
+    with pytest.raises(RuntimeError, match="PageIndex TOC generation failed"):
+        pipeline._generate_toc(cfg, tmp_path / "doc.pdf", page_records)
 
-    assert structure[0]["start_index"] == 1
-    assert structure[0]["end_index"] == 1
+
+def test_generate_toc_raises_on_unsupported_backend(tmp_path: Path) -> None:
+    """Unsupported TOC backends should fail explicitly."""
+    cfg = PipelineConfig(input_path=str(tmp_path / "doc.pdf"))
+    cfg.toc.backend = "unknown"
+    page_records = [PageRecord(page_id=1, text="hello")]
+
+    with pytest.raises(ValueError, match="Unsupported TOC backend"):
+        pipeline._generate_toc(cfg, tmp_path / "doc.pdf", page_records)
 
 
 def test_write_artifacts_writes_manifest_and_tables(tmp_path: Path) -> None:

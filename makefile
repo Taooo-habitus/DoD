@@ -1,6 +1,6 @@
 # This ensures that we can call `make <target>` even if `<target>` exists as a file or
 # directory.
-.PHONY: help docs install install-rust install-uv install-dependencies test lint format type-check check
+.PHONY: help docs install install-rust install-uv install-dependencies test lint format type-check check clean
 
 # Exports all variables defined in the makefile available to scripts
 .EXPORT_ALL_VARIABLES:
@@ -83,3 +83,11 @@ type-check: ## Type-check the project
 	@uv run ty check
 
 check: lint format type-check ## Lint, format, and type-check the code
+
+clean: ## Remove outputs and Python/cache artifacts
+	@echo "Cleaning outputs and Python caches..."
+	@rm -rf outputs htmlcov .pytest_cache .mypy_cache .ruff_cache .hypothesis .tox .nox .pytype
+	@rm -f .coverage .coverage.*
+	@find . -type d -name "__pycache__" -prune -exec rm -rf {} +
+	@find . -type f \( -name "*.pyc" -o -name "*.pyo" \) -delete
+	@echo "Clean complete."

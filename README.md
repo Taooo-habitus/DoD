@@ -1,30 +1,32 @@
 # DoD (Document Digestion Layer)
 
-DoD turns documents into two artifacts:
+DoD turns a document into:
 
-1. `page_table.jsonl` — page-level text + metadata
-2. `toc_tree.json` — hierarchical TOC tree
-3. `image_page_table.jsonl` — page images encoded as base64
+1. `page_table.jsonl` (page text + metadata)
+2. `toc_tree.json` (hierarchical TOC tree)
+3. `image_page_table.jsonl` (raw page images encoded as base64)
 
-The pipeline normalizes documents into images, runs text extraction, builds a
-page table, and then generates a structural tree using PageIndex.
+Core flow:
 
-**Project Structure**
+1. PDF normalization to page images
+2. Text extraction (`pymupdf` / `pymupdf4llm`)
+3. TOC generation (PageIndex)
+4. Artifact writing (JSON/JSONL + manifest)
 
-- `src/DoD/cli/` — CLI entrypoint
-- `src/DoD/pipeline.py` — end-to-end pipeline orchestration
-- `src/DoD/normalize/` — PDF/image normalization to per-page images
-- `src/DoD/text_extractor/` — text extraction backends
-- `src/DoD/page_table.py` — page table data model + writer
-- `src/DoD/pageindex/` — PageIndex TOC builder
-- `src/DoD/toc/` — TOC adapters
-- `conf/config.yaml` — default configuration
-- `examples/` — sample documents
-- `outputs/` — run outputs (timestamped)
+## Project Structure
+
+- `src/DoD/cli/` - CLI entrypoint
+- `src/DoD/pipeline.py` - end-to-end pipeline orchestration
+- `src/DoD/normalize/` - PDF/image normalization to per-page images
+- `src/DoD/text_extractor/` - text extraction backends
+- `src/DoD/page_table.py` - page table data model + writer
+- `src/DoD/pageindex/` - PageIndex TOC builder
+- `src/DoD/toc/` - TOC adapters
+- `src/DoD/server/` - FastAPI server mode
+- `conf/config.yaml` - default configuration
+- `examples/` - sample documents
 
 ## Setup
-
-Create the virtualenv and install dependencies:
 
 ```bash
 uv venv
@@ -32,98 +34,17 @@ source .venv/bin/activate
 uv pip install -e .
 ```
 
-Optional dependencies (install only what you need):
-
-```text
-openai       - PageIndex LLM calls
-tiktoken     - token counting in PageIndex
-PyPDF2       - PDF text extraction (PageIndex)
-pymupdf      - optional PDF parser (PageIndex)
-pymupdf4llm  - PyMuPDF text extraction backend
-pdf2image    - PDF normalization to images (requires poppler)
-tqdm         - text extraction progress bars
-```
-
-## Quickstart
-
-```bash
-uv run python -m scripts.main input_path=path/to/document.pdf
-```
-
-## Server Mode
-
-Run as an API server (supports multiple concurrent PDF jobs):
+Install server extras when using API mode:
 
 ```bash
 uv pip install -e ".[server]"
-uv run python -m scripts.server
 ```
 
-Environment variables:
+## 1) Run As A Package (CLI)
 
-```text
-DOD_SERVER_HOST=0.0.0.0
-DOD_SERVER_PORT=8000
-DOD_SERVER_MAX_CONCURRENT_DOCS=2
-DOD_SERVER_WORK_DIR=outputs/server_jobs
-```
-
-Submit a PDF (wait for result by default):
+Run one document:
 
 ```bash
-curl -X POST "http://localhost:8000/v1/digest" \
-  -F "file=@examples/Paa-vej-til-dansk.pdf" \
-  -F "toc_model=gpt-4o-mini" \
-  -F "toc_concurrent_requests=4"
-```
-
-Submit async (`wait=false`), then poll:
-
-```bash
-curl -X POST "http://localhost:8000/v1/digest?wait=false" \
-  -F "file=@examples/Paa-vej-til-dansk.pdf"
-curl "http://localhost:8000/v1/jobs/<job_id>"
-curl "http://localhost:8000/v1/jobs/<job_id>/result"
-```
-
-Result payload includes:
-
-1. `toc_tree` (JSON)
-2. `page_table` (JSONL parsed to JSON array)
-3. `image_page_table` (JSONL parsed to JSON array)
-
-Artifacts are written under:
-
-```
-outputs/<date>/<time>/artifacts/
-```
-
-## Configuration
-
-Edit `conf/config.yaml` or override on the command line:
-
-```bash
-uv run python -m scripts.main \
-  input_path=path/to/document.pdf \
-  text_extractor.backend=pymupdf \
-  toc.backend=pageindex \
-  toc.concurrent_requests=4 \
-  toc.model=gpt-4o-mini
-```
-
-Set your LLM API key via `PAGEINDEX_API_KEY` (or `OPENAI_API_KEY` / `CHATGPT_API_KEY`).
-Set endpoint via `PAGEINDEX_BASE_URL` (or `OPENAI_BASE_URL`). You can also pass
-`toc.api_key=...` and `toc.api_base_url=...` directly.
-
-## Text Extraction
-
-### PyMuPDF (`text_extractor.backend=pymupdf`)
-
-Extracts text directly from PDFs with PyMuPDF (via `pymupdf4llm`), while still
-keeping normalized page images for downstream encoding.
-
-```bash
-uv pip install pymupdf4llm
 uv run python -m scripts.main \
   input_path=examples/Paa-vej-til-dansk.pdf \
   text_extractor.backend=pymupdf \
@@ -131,21 +52,178 @@ uv run python -m scripts.main \
   toc.model=claude-sonnet-4-5
 ```
 
-## Using Snowflake Cortex (PageIndex)
+Where output is written:
 
-Snowflake Cortex provides an OpenAI SDK compatible endpoint. Set:
+- Hydra run dir: `outputs/<YYYY-MM-DD>/<HH-MM-SS>/`
+- Artifacts folder: `outputs/<YYYY-MM-DD>/<HH-MM-SS>/artifacts/`
+
+Main artifact files:
+
+- `page_table.jsonl`
+- `image_page_table.jsonl`
+- `toc_tree.json`
+- `manifest.json`
+
+## Snowflake Cortex (OpenAI-Compatible)
+
+Set environment variables once before CLI or server runs:
 
 ```bash
 export PAGEINDEX_API_KEY="<snowflake_pat>"
 export PAGEINDEX_BASE_URL="https://<account-identifier>.snowflakecomputing.com/api/v2/cortex/v1"
 ```
 
-Then run with any `toc.model` supported by your Snowflake account:
+Then choose any model available in your Snowflake account via `toc.model`.
+
+## 2) Run As A Server
+
+Start server:
 
 ```bash
-uv run python -m scripts.main \
-  input_path=examples/Paa-vej-til-dansk.pdf \
-  text_extractor.backend=pymupdf \
-  toc.backend=pageindex \
-  toc.model=claude-sonnet-4-5
+export DOD_SERVER_HOST=0.0.0.0
+export DOD_SERVER_PORT=8000
+export DOD_SERVER_MAX_CONCURRENT_DOCS=4
+export DOD_SERVER_WORK_DIR=outputs/server_jobs
+uv run python -m scripts.server
 ```
+
+Health check:
+
+```bash
+curl http://localhost:8000/healthz
+```
+
+## 3) Make Requests
+
+### 3.1 Single PDF (wait for final result)
+
+```bash
+curl -s -X POST "http://localhost:8000/v1/digest" \
+  -F "file=@examples/Paa-vej-til-dansk.pdf" \
+  -F "text_extractor_backend=pymupdf" \
+  -F "toc_backend=pageindex" \
+  -F "toc_model=claude-sonnet-4-5" \
+  -F "toc_concurrent_requests=4" \
+  > result.json
+```
+
+This call blocks until the job is done and writes full result JSON to `result.json`.
+
+### 3.2 Async job (submit, then poll)
+
+Submit:
+
+```bash
+JOB_ID=$(curl -s -X POST "http://localhost:8000/v1/digest?wait=false" \
+  -F "file=@examples/Paa-vej-til-dansk.pdf" \
+  -F "text_extractor_backend=pymupdf" \
+  -F "toc_backend=pageindex" \
+  -F "toc_model=claude-sonnet-4-5" | jq -r '.job_id')
+```
+
+Check status:
+
+```bash
+curl -s "http://localhost:8000/v1/jobs/$JOB_ID"
+```
+
+Get final result:
+
+```bash
+curl -s "http://localhost:8000/v1/jobs/$JOB_ID/result" > result.json
+```
+
+### 3.3 Process More Than One PDF At The Same Time
+
+Use async submit (`wait=false`) + parallel curl:
+
+```bash
+mkdir -p jobs
+printf "%s\n" \
+  "/path/to/a.pdf" \
+  "/path/to/b.pdf" \
+  "/path/to/c.pdf" \
+| xargs -I{} -P 3 sh -c '
+  name=$(basename "{}" .pdf)
+  curl -s -X POST "http://localhost:8000/v1/digest?wait=false" \
+    -F "file=@{}" \
+    -F "text_extractor_backend=pymupdf" \
+    -F "toc_backend=pageindex" \
+    -F "toc_model=claude-sonnet-4-5" \
+    -F "toc_concurrent_requests=4" \
+  > "jobs/${name}.submit.json"
+'
+```
+
+Poll and download all results:
+
+```bash
+for f in jobs/*.submit.json; do
+  job_id=$(jq -r '.job_id' "$f")
+  name=$(basename "$f" .submit.json)
+  until curl -sf "http://localhost:8000/v1/jobs/$job_id/result" > "jobs/${name}.result.json"; do
+    sleep 2
+  done
+done
+```
+
+Notes:
+
+- `-P 3` controls how many submit requests run in parallel.
+- Server-side processing concurrency is capped by `DOD_SERVER_MAX_CONCURRENT_DOCS`.
+- TOC runs in strict mode: if PageIndex fails, the job status becomes `failed` (no fallback TOC).
+
+## 4) Output: What And Where
+
+### 4.1 Output in API response JSON
+
+`/v1/digest` (sync) or `/v1/jobs/{job_id}/result` returns:
+
+- `result.toc_tree` - TOC tree JSON
+- `result.page_table` - page records (JSON array parsed from JSONL)
+- `result.image_page_table` - image records (JSON array parsed from JSONL)
+- `result.artifact_paths` - filesystem paths for written artifacts
+- `result.manifest` - run metadata + config
+
+Convert arrays back to JSONL if needed:
+
+```bash
+jq -c '.result.page_table[]' result.json > page_table.jsonl
+jq -c '.result.image_page_table[]' result.json > image_page_table.jsonl
+jq '.result.toc_tree' result.json > toc_tree.json
+```
+
+### 4.2 Output on disk (Server mode)
+
+For each job:
+
+- Job folder: `${DOD_SERVER_WORK_DIR}/<job_id>/`
+- Input copy: `${DOD_SERVER_WORK_DIR}/<job_id>/input.pdf`
+- Artifact folder: `${DOD_SERVER_WORK_DIR}/<job_id>/artifacts/`
+
+Inside `artifacts/`:
+
+- `page_table.jsonl`
+- `image_page_table.jsonl`
+- `toc_tree.json`
+- `manifest.json`
+
+## Request Fields (Server `/v1/digest`)
+
+Multipart form fields:
+
+- `file` (required, `.pdf`)
+- `text_extractor_backend` (optional, recommended: `pymupdf`)
+- `normalize_max_pages` (optional int)
+- `toc_backend` (optional, typically `pageindex`)
+- `toc_model` (optional model name)
+- `toc_concurrent_requests` (optional int)
+- `toc_check_page_num` (optional int)
+- `toc_api_key` (optional per-request override)
+- `toc_api_base_url` (optional per-request override)
+
+Query parameter:
+
+- `wait` (default `true`)
+  - `true`: request returns when job finishes
+  - `false`: request returns immediately with `job_id`

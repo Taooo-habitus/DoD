@@ -19,7 +19,7 @@ from DoD.text_extractor.base import TextExtractor
 from DoD.text_extractor.dummy import DummyExtractor
 from DoD.text_extractor.plain_text import PlainTextExtractor
 from DoD.text_extractor.pymupdf import PyMuPDFExtractor
-from DoD.toc.pageindex_adapter import PageIndexAdapter, fallback_toc
+from DoD.toc.pageindex_adapter import PageIndexAdapter
 
 logger = logging.getLogger(__name__)
 
@@ -103,20 +103,21 @@ def _select_extractor(cfg: PipelineConfig, input_path: Path):
 def _generate_toc(
     cfg: PipelineConfig, input_path: Path, page_records: List[PageRecord]
 ) -> Dict[str, object]:
-    if cfg.toc.backend.lower() == "pageindex":
-        try:
-            raw_config = (
-                asdict(cfg.toc)
-                if is_dataclass(cfg.toc)
-                else OmegaConf.to_container(cfg.toc, resolve=True)
-            )
-            toc_config = cast(Dict[str, Any], raw_config)
-            adapter = PageIndexAdapter(config=toc_config)
-            return adapter.generate(input_path, page_records=page_records)
-        except Exception as exc:  # noqa: BLE001 - fallback on any PageIndex failure
-            logger.warning("PageIndex failed, using fallback TOC. %s", exc)
+    if cfg.toc.backend.lower() != "pageindex":
+        raise ValueError(f"Unsupported TOC backend: {cfg.toc.backend}")
 
-    return fallback_toc(total_pages=len(page_records))
+    raw_config = (
+        asdict(cfg.toc)
+        if is_dataclass(cfg.toc)
+        else OmegaConf.to_container(cfg.toc, resolve=True)
+    )
+    toc_config = cast(Dict[str, Any], raw_config)
+    adapter = PageIndexAdapter(config=toc_config)
+
+    try:
+        return adapter.generate(input_path, page_records=page_records)
+    except Exception as exc:  # noqa: BLE001 - strict mode: fail the whole run
+        raise RuntimeError(f"PageIndex TOC generation failed: {exc}") from exc
 
 
 def _write_artifacts(
