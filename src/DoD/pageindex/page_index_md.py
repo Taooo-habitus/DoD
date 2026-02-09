@@ -364,7 +364,9 @@ async def md_to_tree(
             print("Generating document description...")
             # Create a clean structure without unnecessary fields for description generation
             clean_structure = create_clean_structure_for_description(tree_structure)
-            doc_description = generate_doc_description(clean_structure, model=model)
+            doc_description = await generate_doc_description(
+                clean_structure, model=model
+            )
             return {
                 "doc_name": os.path.splitext(os.path.basename(md_path))[0],
                 "doc_description": doc_description,

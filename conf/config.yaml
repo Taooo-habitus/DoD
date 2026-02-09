@@ -13,7 +13,7 @@ normalize:
 
 text_extractor:
   backend: "pytesseract"
-  batch: 1
+  batch: 10
 
 page_table:
   include_metadata: true
@@ -21,15 +21,16 @@ page_table:
 toc:
   backend: "pageindex"
   model: "gpt-4o-2024-11-20"
-  concurrent_requests: 4
+  concurrent_requests: 128
   api_key: null
   api_base_url: null
   toc_check_page_num: 20
   max_page_num_each_node: 10
   max_token_num_each_node: 20000
+  max_fix_attempts: 2
   if_add_node_id: "yes"
   if_add_node_summary: "yes"
-  if_add_doc_description: "no"
+  if_add_doc_description: "yes"
   if_add_node_text: "no"
 
 artifacts:

@@ -6,6 +6,7 @@ import asyncio
 import contextlib
 import contextvars
 import copy
+import hashlib
 import importlib
 import json
 import logging
@@ -15,6 +16,7 @@ import time
 from datetime import datetime
 from functools import lru_cache
 from io import BytesIO
+from pathlib import Path
 from types import SimpleNamespace as config
 from typing import Any, Dict, Iterable, List, Optional
 
@@ -33,6 +35,12 @@ _REQUEST_API_KEY: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar
 )
 _REQUEST_BASE_URL: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar(
     "request_base_url", default=None
+)
+_REQUEST_SEMAPHORE: contextvars.ContextVar[Optional[asyncio.Semaphore]] = (
+    contextvars.ContextVar("request_llm_semaphore", default=None)
+)
+_REQUEST_LLM_CACHE: contextvars.ContextVar[Optional["LLMCache"]] = (
+    contextvars.ContextVar("request_llm_cache", default=None)
 )
 
 
@@ -62,6 +70,69 @@ def request_openai_config(
     finally:
         _REQUEST_API_KEY.reset(token_api_key)
         _REQUEST_BASE_URL.reset(token_base_url)
+
+
+@contextlib.contextmanager
+def request_llm_concurrency(limit: Optional[int]):
+    """Temporarily set a per-request LLM concurrency limit."""
+    semaphore: Optional[asyncio.Semaphore] = None
+    if isinstance(limit, int) and limit > 0:
+        semaphore = asyncio.Semaphore(limit)
+    token = _REQUEST_SEMAPHORE.set(semaphore)
+    try:
+        yield
+    finally:
+        _REQUEST_SEMAPHORE.reset(token)
+
+
+@contextlib.contextmanager
+def request_llm_cache(cache: Optional["LLMCache"]):
+    """Temporarily set a per-request LLM cache."""
+    token = _REQUEST_LLM_CACHE.set(cache)
+    try:
+        yield
+    finally:
+        _REQUEST_LLM_CACHE.reset(token)
+
+
+class LLMCache:
+    """File-based cache for LLM responses."""
+
+    def __init__(self, cache_dir: str | Path):
+        """Create a cache rooted at the given directory."""
+        self.cache_dir = Path(cache_dir)
+        self.cache_dir.mkdir(parents=True, exist_ok=True)
+
+    def _key_to_path(self, key: str) -> Path:
+        return self.cache_dir / f"{key}.json"
+
+    def get(self, key: str) -> Optional[Dict[str, Any]]:
+        """Return cached payload for the key if present."""
+        path = self._key_to_path(key)
+        if not path.exists():
+            return None
+        try:
+            return json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            return None
+
+    def set(self, key: str, payload: Dict[str, Any]) -> None:
+        """Persist payload for the given key."""
+        path = self._key_to_path(key)
+        path.write_text(json.dumps(payload), encoding="utf-8")
+
+
+def _hash_prompt(
+    model: str, prompt: str, chat_history: Optional[List[Dict[str, str]]]
+) -> str:
+    hasher = hashlib.sha256()
+    hasher.update(model.encode("utf-8"))
+    hasher.update(b"\n")
+    if chat_history:
+        hasher.update(json.dumps(chat_history, sort_keys=True).encode("utf-8"))
+        hasher.update(b"\n")
+    hasher.update(prompt.encode("utf-8"))
+    return hasher.hexdigest()
 
 
 def _resolve_api_key(api_key: Optional[str]) -> str:
@@ -191,6 +262,7 @@ def ChatGPT_API_with_finish_reason(
         raise ValueError("model is required for LLM calls.")
     max_retries = 10
     client = _get_openai_client(api_key=api_key, base_url=api_base_url)
+    cache = _REQUEST_LLM_CACHE.get()
     for i in range(max_retries):
         try:
             if chat_history:
@@ -198,13 +270,31 @@ def ChatGPT_API_with_finish_reason(
             else:
                 messages = [{"role": "user", "content": prompt}]
 
+            cache_key = None
+            if cache and model:
+                cache_key = _hash_prompt(model, prompt, chat_history)
+                cached = cache.get(cache_key)
+                if (
+                    cached
+                    and cached.get("finish_reason")
+                    and cached.get("content") is not None
+                ):
+                    return cached["content"], cached["finish_reason"]
+
             response = client.chat.completions.create(
                 model=model, messages=messages, temperature=0
             )
             if response.choices[0].finish_reason == "length":
-                return response.choices[0].message.content, "max_output_reached"
+                content = response.choices[0].message.content
+                finish_reason = "max_output_reached"
             else:
-                return response.choices[0].message.content, "finished"
+                content = response.choices[0].message.content
+                finish_reason = "finished"
+            if cache and cache_key:
+                cache.set(
+                    cache_key, {"content": content, "finish_reason": finish_reason}
+                )
+            return content, finish_reason
 
         except Exception as exc:
             logging.error("Retrying LLM call after error: %s", exc)
@@ -228,6 +318,7 @@ def ChatGPT_API(
         raise ValueError("model is required for LLM calls.")
     max_retries = 10
     client = _get_openai_client(api_key=api_key, base_url=api_base_url)
+    cache = _REQUEST_LLM_CACHE.get()
     for i in range(max_retries):
         try:
             if chat_history:
@@ -235,11 +326,21 @@ def ChatGPT_API(
             else:
                 messages = [{"role": "user", "content": prompt}]
 
+            cache_key = None
+            if cache and model:
+                cache_key = _hash_prompt(model, prompt, chat_history)
+                cached = cache.get(cache_key)
+                if cached and cached.get("content") is not None:
+                    return cached["content"]
+
             response = client.chat.completions.create(
                 model=model, messages=messages, temperature=0
             )
 
-            return response.choices[0].message.content
+            content = response.choices[0].message.content
+            if cache and cache_key:
+                cache.set(cache_key, {"content": content})
+            return content
         except Exception as exc:
             logging.error("Retrying LLM call after error: %s", exc)
             if i < max_retries - 1:
@@ -250,24 +351,109 @@ def ChatGPT_API(
     return "Error"
 
 
+async def ChatGPT_API_with_finish_reason_async(
+    model: Optional[str],
+    prompt: str,
+    api_key: Optional[str] = None,
+    api_base_url: Optional[str] = None,
+    chat_history: Optional[List[Dict[str, str]]] = None,
+) -> tuple[str, str]:
+    """Call a model asynchronously and return content with finish reason."""
+    if model is None:
+        raise ValueError("model is required for LLM calls.")
+    max_retries = 10
+    client = _get_openai_async_client(api_key=api_key, base_url=api_base_url)
+    semaphore = _REQUEST_SEMAPHORE.get()
+    cache = _REQUEST_LLM_CACHE.get()
+    for i in range(max_retries):
+        try:
+            if chat_history:
+                messages = [*chat_history, {"role": "user", "content": prompt}]
+            else:
+                messages = [{"role": "user", "content": prompt}]
+
+            cache_key = None
+            if cache and model:
+                cache_key = _hash_prompt(model, prompt, chat_history)
+                cached = cache.get(cache_key)
+                if (
+                    cached
+                    and cached.get("finish_reason")
+                    and cached.get("content") is not None
+                ):
+                    return cached["content"], cached["finish_reason"]
+
+            if semaphore:
+                async with semaphore:
+                    response = await client.chat.completions.create(
+                        model=model, messages=messages, temperature=0
+                    )
+            else:
+                response = await client.chat.completions.create(
+                    model=model, messages=messages, temperature=0
+                )
+            if response.choices[0].finish_reason == "length":
+                content = response.choices[0].message.content
+                finish_reason = "max_output_reached"
+            else:
+                content = response.choices[0].message.content
+                finish_reason = "finished"
+            if cache and cache_key:
+                cache.set(
+                    cache_key, {"content": content, "finish_reason": finish_reason}
+                )
+            return content, finish_reason
+        except Exception as exc:
+            logging.error("Retrying async LLM call after error: %s", exc)
+            if i < max_retries - 1:
+                await asyncio.sleep(1)
+            else:
+                logging.error("Max retries reached for prompt.")
+                return "", "error"
+    return "", "error"
+
+
 async def ChatGPT_API_async(
     model: Optional[str],
     prompt: str,
     api_key: Optional[str] = None,
     api_base_url: Optional[str] = None,
+    chat_history: Optional[List[Dict[str, str]]] = None,
 ) -> str:
     """Call a model asynchronously and return the response content."""
     if model is None:
         raise ValueError("model is required for LLM calls.")
     max_retries = 10
-    messages = [{"role": "user", "content": prompt}]
     client = _get_openai_async_client(api_key=api_key, base_url=api_base_url)
+    semaphore = _REQUEST_SEMAPHORE.get()
+    cache = _REQUEST_LLM_CACHE.get()
     for i in range(max_retries):
         try:
-            response = await client.chat.completions.create(
-                model=model, messages=messages, temperature=0
-            )
-            return response.choices[0].message.content
+            if chat_history:
+                messages = [*chat_history, {"role": "user", "content": prompt}]
+            else:
+                messages = [{"role": "user", "content": prompt}]
+
+            cache_key = None
+            if cache and model:
+                cache_key = _hash_prompt(model, prompt, chat_history)
+                cached = cache.get(cache_key)
+                if cached and cached.get("content") is not None:
+                    return cached["content"]
+
+            if semaphore:
+                async with semaphore:
+                    response = await client.chat.completions.create(
+                        model=model, messages=messages, temperature=0
+                    )
+            else:
+                response = await client.chat.completions.create(
+                    model=model, messages=messages, temperature=0
+                )
+            content = response.choices[0].message.content
+            if cache and cache_key:
+                cache.set(cache_key, {"content": content})
+            return content
         except Exception as exc:
             logging.error("Retrying async LLM call after error: %s", exc)
             if i < max_retries - 1:
@@ -527,6 +713,8 @@ class JsonLogger:
 
     def log(self, level: str, message: Any, **kwargs: Any) -> None:
         """Persist a log record."""
+        level_value = getattr(logging, level, logging.INFO)
+        logging.getLogger("DoD.pageindex").log(level_value, message)
         if isinstance(message, dict):
             self.log_data.append(message)
         else:
@@ -544,6 +732,10 @@ class JsonLogger:
     def error(self, message: Any, **kwargs: Any) -> None:
         """Log an error-level message."""
         self.log("ERROR", message, **kwargs)
+
+    def warning(self, message: Any, **kwargs: Any) -> None:
+        """Log a warning-level message."""
+        self.log("WARNING", message, **kwargs)
 
     def debug(self, message: Any, **kwargs: Any) -> None:
         """Log a debug-level message."""
@@ -901,7 +1093,7 @@ def create_clean_structure_for_description(structure: Any) -> Any:
         return structure
 
 
-def generate_doc_description(structure: Any, model: Optional[str] = None) -> str:
+async def generate_doc_description(structure: Any, model: Optional[str] = None) -> str:
     """Generate a one-sentence description for the document."""
     prompt = f"""Your are an expert in generating descriptions for a document.
     You are given a structure of a document. Your task is to generate a one-sentence description for the document, which makes it easy to distinguish the document from other documents.
@@ -910,7 +1102,7 @@ def generate_doc_description(structure: Any, model: Optional[str] = None) -> str
 
     Directly return the description, do not include any other text.
     """
-    response = ChatGPT_API(model, prompt)
+    response = await ChatGPT_API_async(model, prompt)
     return response
 
 

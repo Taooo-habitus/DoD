@@ -10,6 +10,14 @@ from typing import Iterable, List
 IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".tiff", ".bmp"}
 
 
+def _progress(iterable, total: int | None, desc: str):
+    try:
+        from tqdm import tqdm
+    except ImportError:
+        return iterable
+    return tqdm(iterable, total=total, desc=desc)
+
+
 def _is_image(path: Path) -> bool:
     return path.suffix.lower() in IMAGE_EXTENSIONS
 
@@ -56,8 +64,11 @@ def normalize_to_images(
 
 
 def _copy_images(image_paths: Iterable[Path], output_dir: Path) -> List[Path]:
+    paths = list(image_paths)
     copied = []
-    for idx, path in enumerate(image_paths, start=1):
+    for idx, path in enumerate(
+        _progress(paths, total=len(paths), desc="Normalize (copy images)"), start=1
+    ):
         target = output_dir / f"page_{idx:04d}{path.suffix.lower()}"
         shutil.copy2(path, target)
         copied.append(target)
@@ -81,7 +92,9 @@ def _pdf_to_images(
         pages = pages[:max_pages]
 
     image_paths: List[Path] = []
-    for idx, page in enumerate(pages, start=1):
+    for idx, page in enumerate(
+        _progress(pages, total=len(pages), desc="Normalize (pdf to images)"), start=1
+    ):
         target = output_dir / f"page_{idx:04d}.{image_format}"
         page.save(target, image_format.upper())
         image_paths.append(target)

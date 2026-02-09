@@ -41,6 +41,7 @@ class PageIndexAdapter:
             toc_check_page_num=self.config["toc_check_page_num"],
             max_page_num_each_node=self.config["max_page_num_each_node"],
             max_token_num_each_node=self.config["max_token_num_each_node"],
+            max_fix_attempts=self.config.get("max_fix_attempts", 2),
             if_add_node_id=self.config["if_add_node_id"],
             if_add_node_summary=self.config["if_add_node_summary"],
             if_add_doc_description=self.config["if_add_doc_description"],
@@ -54,7 +55,10 @@ class PageIndexAdapter:
             import asyncio
 
             from DoD.pageindex.page_index_md import md_to_tree
-            from DoD.pageindex.utils import request_openai_config
+            from DoD.pageindex.utils import (
+                request_llm_concurrency,
+                request_openai_config,
+            )
         except ImportError as exc:
             raise RuntimeError(
                 "DoD.pageindex is required for Markdown TOC generation."
@@ -63,19 +67,20 @@ class PageIndexAdapter:
         with request_openai_config(
             api_key=self.config.get("api_key"), base_url=self.config.get("api_base_url")
         ):
-            return asyncio.run(
-                md_to_tree(
-                    md_path=str(input_path),
-                    model=self.config["model"],
-                    if_thinning=True,
-                    min_token_threshold=5000,
-                    if_add_node_summary=self.config["if_add_node_summary"],
-                    summary_token_threshold=200,
-                    if_add_doc_description=self.config["if_add_doc_description"],
-                    if_add_node_text=self.config["if_add_node_text"],
-                    if_add_node_id=self.config["if_add_node_id"],
+            with request_llm_concurrency(self.config.get("concurrent_requests", 4)):
+                return asyncio.run(
+                    md_to_tree(
+                        md_path=str(input_path),
+                        model=self.config["model"],
+                        if_thinning=True,
+                        min_token_threshold=5000,
+                        if_add_node_summary=self.config["if_add_node_summary"],
+                        summary_token_threshold=200,
+                        if_add_doc_description=self.config["if_add_doc_description"],
+                        if_add_node_text=self.config["if_add_node_text"],
+                        if_add_node_id=self.config["if_add_node_id"],
+                    )
                 )
-            )
 
     def _generate_from_page_records(
         self, input_path: Path, page_records: List[PageRecord]
@@ -100,6 +105,7 @@ class PageIndexAdapter:
             toc_check_page_num=self.config["toc_check_page_num"],
             max_page_num_each_node=self.config["max_page_num_each_node"],
             max_token_num_each_node=self.config["max_token_num_each_node"],
+            max_fix_attempts=self.config.get("max_fix_attempts", 2),
             if_add_node_id=self.config["if_add_node_id"],
             if_add_node_summary=self.config["if_add_node_summary"],
             if_add_doc_description=self.config["if_add_doc_description"],

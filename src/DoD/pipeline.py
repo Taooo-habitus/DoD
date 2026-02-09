@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import time
 from dataclasses import asdict, is_dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, cast
@@ -27,17 +28,112 @@ logger = logging.getLogger(__name__)
 
 def digest_document(cfg: PipelineConfig) -> Dict[str, str]:
     """Run the document digestion pipeline and return artifact paths."""
-    input_path = _resolve_input_path(cfg.input_path)
-    output_dir, images_dir = _prepare_output_dirs(cfg)
-    extractor = _select_extractor(cfg, input_path)
-    image_paths = _normalize_if_needed(cfg, input_path, images_dir, extractor)
-    page_records = extractor.extract(input_path, image_paths=image_paths)
-    logger.info("Extracted %s pages.", len(page_records))
+    profiling: Dict[str, Any] = {}
+    profiling_stages: Dict[str, Dict[str, object]] = {}
+    profiling["stages"] = profiling_stages
+    total_start = time.perf_counter()
 
-    toc_tree = _generate_toc(cfg, input_path, page_records)
-    return _write_artifacts(
-        cfg, input_path, output_dir, page_records, toc_tree, image_paths
+    stage_start = time.perf_counter()
+    input_path = _resolve_input_path(cfg.input_path)
+    profiling_stages["resolve_input"] = {
+        "seconds": time.perf_counter() - stage_start,
+        "skipped": False,
+    }
+
+    stage_start = time.perf_counter()
+    output_dir, images_dir = _prepare_output_dirs(cfg)
+    profiling_stages["prepare_output_dirs"] = {
+        "seconds": time.perf_counter() - stage_start,
+        "skipped": False,
+    }
+
+    stage_start = time.perf_counter()
+    extractor = _select_extractor(cfg, input_path)
+    profiling_stages["select_extractor"] = {
+        "seconds": time.perf_counter() - stage_start,
+        "skipped": False,
+    }
+
+    logger.info(
+        "Pipeline start: input=%s backend=%s batch=%s",
+        input_path,
+        cfg.text_extractor.backend,
+        cfg.text_extractor.batch,
     )
+
+    stage_start = time.perf_counter()
+    image_paths = _normalize_if_needed(cfg, input_path, images_dir, extractor)
+    normalize_duration = time.perf_counter() - stage_start
+    profiling_stages["normalize"] = {
+        "seconds": normalize_duration,
+        "skipped": image_paths is None,
+    }
+    if image_paths is None:
+        logger.info("Normalize skipped (extractor does not require images).")
+    else:
+        logger.info(
+            "Normalize completed: %s pages in %.2fs",
+            len(image_paths),
+            normalize_duration,
+        )
+
+    stage_start = time.perf_counter()
+    page_records = extractor.extract(input_path, image_paths=image_paths)
+    extract_duration = time.perf_counter() - stage_start
+    profiling_stages["extract_text"] = {"seconds": extract_duration, "skipped": False}
+    logger.info("Extracted %s pages in %.2fs.", len(page_records), extract_duration)
+
+    stage_start = time.perf_counter()
+    toc_tree = _generate_toc(cfg, input_path, page_records)
+    toc_duration = time.perf_counter() - stage_start
+    profiling_stages["generate_toc"] = {"seconds": toc_duration, "skipped": False}
+    logger.info("TOC generated in %.2fs.", toc_duration)
+
+    stage_start = time.perf_counter()
+    artifacts = _write_artifacts(
+        cfg,
+        input_path,
+        output_dir,
+        page_records,
+        toc_tree,
+        image_paths,
+        profiling=profiling,
+    )
+    write_duration = time.perf_counter() - stage_start
+    profiling_stages["write_artifacts"] = {"seconds": write_duration, "skipped": False}
+    profiling["total_seconds"] = time.perf_counter() - total_start
+    profiling["page_count"] = len(page_records)
+    logger.info(
+        "Artifacts written in %.2fs (total %.2fs).",
+        write_duration,
+        profiling["total_seconds"],
+    )
+    _log_profiling_summary(profiling)
+
+    return artifacts
+
+
+def _log_profiling_summary(profiling: Dict[str, Any]) -> None:
+    """Emit a single-line profiling summary at pipeline completion."""
+    stages = profiling.get("stages", {})
+    stage_parts: List[str] = []
+    for name, payload in stages.items():
+        if not isinstance(payload, dict):
+            continue
+        seconds = payload.get("seconds")
+        skipped = payload.get("skipped")
+        if skipped:
+            stage_parts.append(f"{name}=skipped")
+        elif isinstance(seconds, (int, float)):
+            stage_parts.append(f"{name}={seconds:.2f}s")
+    total_seconds = profiling.get("total_seconds")
+    page_count = profiling.get("page_count")
+    suffix = ""
+    if isinstance(total_seconds, (int, float)):
+        suffix = f" total={total_seconds:.2f}s"
+    if isinstance(page_count, int):
+        suffix = f"{suffix} pages={page_count}"
+    logger.info("Pipeline finished: %s%s", ", ".join(stage_parts), suffix)
 
 
 def _resolve_input_path(input_path: str) -> Path:
@@ -131,6 +227,7 @@ def _write_artifacts(
     page_records: List[PageRecord],
     toc_tree: Dict[str, object],
     image_paths: Optional[List[Path]],
+    profiling: Optional[Dict[str, object]] = None,
 ) -> Dict[str, str]:
     page_table_path = output_dir / cfg.artifacts.page_table_filename
     write_page_table(page_table_path, page_records)
@@ -145,7 +242,7 @@ def _write_artifacts(
     config_payload = (
         asdict(cfg) if is_dataclass(cfg) else OmegaConf.to_container(cfg, resolve=True)
     )
-    manifest = {
+    manifest: Dict[str, object] = {
         "input_path": str(input_path),
         "page_count": len(page_records),
         "artifacts": {
@@ -155,6 +252,8 @@ def _write_artifacts(
         },
         "config": config_payload,
     }
+    if profiling is not None:
+        manifest["profiling"] = profiling
     manifest_path = output_dir / cfg.artifacts.manifest_filename
     write_json(manifest_path, manifest)
 

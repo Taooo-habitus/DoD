@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import os
 import uuid
 from contextlib import asynccontextmanager
@@ -17,6 +18,8 @@ from fastapi import FastAPI, File, Form, HTTPException, Query, UploadFile
 from DoD.config import PipelineConfig
 from DoD.io.artifacts import read_json
 from DoD.pipeline import digest_document
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -79,8 +82,41 @@ def _build_result_payload(artifacts: Dict[str, str]) -> Dict[str, Any]:
         "page_table": _read_jsonl(page_table_path),
         "image_page_table": _read_jsonl(image_page_table_path),
         "artifact_paths": manifest["artifacts"],
+        "profiling": manifest.get("profiling", {}),
+        "profiling_summary": _format_profiling_summary(manifest.get("profiling", {})),
         "manifest": manifest,
     }
+
+
+def _format_profiling_summary(profiling: Dict[str, Any]) -> str:
+    """Return a concise profiling summary string."""
+    stages = profiling.get("stages", {})
+    stage_parts: List[str] = []
+    if isinstance(stages, dict):
+        for name, payload in stages.items():
+            if not isinstance(payload, dict):
+                continue
+            seconds = payload.get("seconds")
+            skipped = payload.get("skipped")
+            if skipped:
+                stage_parts.append(f"{name}=skipped")
+            elif isinstance(seconds, (int, float)):
+                stage_parts.append(f"{name}={seconds:.2f}s")
+    total_seconds = profiling.get("total_seconds")
+    page_count = profiling.get("page_count")
+    suffix_parts: List[str] = []
+    if isinstance(total_seconds, (int, float)):
+        suffix_parts.append(f"total={total_seconds:.2f}s")
+    if isinstance(page_count, int):
+        suffix_parts.append(f"pages={page_count}")
+    summary = ", ".join(stage_parts)
+    if suffix_parts:
+        summary = (
+            f"{summary} ({', '.join(suffix_parts)})"
+            if summary
+            else ", ".join(suffix_parts)
+        )
+    return summary or "profiling unavailable"
 
 
 def _build_pipeline_config(
@@ -97,7 +133,8 @@ def _build_pipeline_config(
     toc_api_base_url: Optional[str],
 ) -> PipelineConfig:
     """Build a request-scoped pipeline config."""
-    cfg = PipelineConfig(input_path=str(input_path))
+    cfg = _load_default_config()
+    cfg.input_path = str(input_path)
     cfg.artifacts.output_dir = str(output_dir)
 
     if text_extractor_backend:
@@ -119,9 +156,42 @@ def _build_pipeline_config(
     return cfg
 
 
+def _load_default_config() -> PipelineConfig:
+    """Load config defaults from conf/config.yaml for server jobs."""
+    try:
+        import yaml
+        from omegaconf import OmegaConf
+    except ImportError as exc:
+        raise RuntimeError(
+            "pyyaml and omegaconf are required to load server config defaults."
+        ) from exc
+
+    config_path = Path(__file__).resolve().parents[3] / "conf" / "config.yaml"
+    cfg = PipelineConfig()
+    if not config_path.exists():
+        return cfg
+    raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    if isinstance(raw, dict) and "hydra" in raw:
+        raw.pop("hydra", None)
+    data = OmegaConf.to_container(OmegaConf.create(raw or {}), resolve=True)
+    if isinstance(data, dict):
+        merged = OmegaConf.merge(OmegaConf.structured(PipelineConfig()), data)
+        cfg_obj = OmegaConf.to_object(merged)
+        if isinstance(cfg_obj, PipelineConfig):
+            cfg = cfg_obj
+    return cfg
+
+
 @asynccontextmanager
 async def _lifespan(_app: FastAPI):
     """Initialize app-scoped state."""
+    root_logger = logging.getLogger()
+    if not root_logger.handlers:
+        logging.basicConfig(
+            level=logging.INFO,
+            format="%(asctime)s %(levelname)s %(name)s - %(message)s",
+        )
+    logging.getLogger("DoD").setLevel(logging.INFO)
     work_dir = Path(os.getenv("DOD_SERVER_WORK_DIR", "outputs/server_jobs")).resolve()
     work_dir.mkdir(parents=True, exist_ok=True)
     _app.state.work_dir = work_dir
@@ -157,6 +227,12 @@ async def _run_job(job_id: str, cfg: PipelineConfig) -> None:
         try:
             artifacts = await asyncio.to_thread(digest_document, cfg)
             result = await asyncio.to_thread(_build_result_payload, artifacts)
+            summary = result.get("profiling_summary")
+            if summary:
+                logger.info("Pipeline finished: %s", summary)
+            config_payload = result.get("manifest", {}).get("config")
+            if config_payload is not None:
+                logger.info("Pipeline config: %s", json.dumps(config_payload))
             async with app.state.jobs_lock:
                 job = app.state.jobs[job_id]
                 job.status = "succeeded"
