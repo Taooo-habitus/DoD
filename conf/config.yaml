@@ -12,7 +12,8 @@ normalize:
   max_pages: null
 
 text_extractor:
-  backend: "pymupdf"
+  backend: "pytesseract"
+  batch: 1
 
 page_table:
   include_metadata: true

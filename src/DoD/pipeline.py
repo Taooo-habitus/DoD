@@ -19,6 +19,7 @@ from DoD.text_extractor.base import TextExtractor
 from DoD.text_extractor.dummy import DummyExtractor
 from DoD.text_extractor.plain_text import PlainTextExtractor
 from DoD.text_extractor.pymupdf import PyMuPDFExtractor
+from DoD.text_extractor.pytesseract import PyTesseractExtractor
 from DoD.toc.pageindex_adapter import PageIndexAdapter
 
 logger = logging.getLogger(__name__)
@@ -86,7 +87,10 @@ def _select_extractor(cfg: PipelineConfig, input_path: Path):
         return DummyExtractor()
 
     if backend in {"pymupdf", "pymupdf4llm"}:
-        return PyMuPDFExtractor()
+        return PyMuPDFExtractor(batch=cfg.text_extractor.batch)
+
+    if backend == "pytesseract":
+        return PyTesseractExtractor(batch=cfg.text_extractor.batch)
 
     removed_backends = {"glm_ocr", "glm_ocr_transformers", "ollama_ocr"}
     if backend in removed_backends:

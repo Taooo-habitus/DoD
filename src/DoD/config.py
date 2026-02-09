@@ -20,6 +20,7 @@ class TextExtractorConfig:
     """Settings for text extraction."""
 
     backend: str = "pymupdf"
+    batch: int = 1
 
 
 @dataclass

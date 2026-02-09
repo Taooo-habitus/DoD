@@ -23,6 +23,8 @@ pageindex = [
 text_extractor = [
     "pymupdf>=1.24.0",
     "pymupdf4llm",
+    "pytesseract>=0.3.13",
+    "Pillow>=10.4.0",
 ]
 server = [
     "fastapi>=0.116.0",

@@ -8,6 +8,7 @@ from DoD.config import PipelineConfig
 from DoD.pipeline import _select_extractor
 from DoD.text_extractor.plain_text import PlainTextExtractor
 from DoD.text_extractor.pymupdf import PyMuPDFExtractor
+from DoD.text_extractor.pytesseract import PyTesseractExtractor
 
 
 def test_select_extractor_uses_plain_text_for_text_inputs() -> None:
@@ -37,6 +38,16 @@ def test_select_extractor_removed_backend_raises() -> None:
 
     with pytest.raises(ValueError, match="has been removed"):
         _select_extractor(cfg, Path("doc.pdf"))
+
+
+def test_select_extractor_accepts_pytesseract_backend() -> None:
+    """Pytesseract should map to the PyTesseract extractor."""
+    cfg = PipelineConfig(input_path="doc.pdf")
+    cfg.text_extractor.backend = "pytesseract"
+
+    extractor = _select_extractor(cfg, Path("doc.pdf"))
+
+    assert isinstance(extractor, PyTesseractExtractor)
 
 
 def test_select_extractor_unknown_backend_raises() -> None:

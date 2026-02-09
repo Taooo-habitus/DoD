@@ -341,8 +341,10 @@ server = [
     { name = "uvicorn" },
 ]
 text-extractor = [
+    { name = "pillow" },
     { name = "pymupdf" },
     { name = "pymupdf4llm" },
+    { name = "pytesseract" },
 ]
 
 [package.dev-dependencies]
@@ -371,10 +373,12 @@ requires-dist = [
     { name = "omegaconf", specifier = ">=2.3.0" },
     { name = "openai", marker = "extra == 'pageindex'", specifier = ">=1.0.0" },
     { name = "pdf2image", marker = "extra == 'pdf'", specifier = ">=1.17.0" },
+    { name = "pillow", marker = "extra == 'text-extractor'", specifier = ">=10.4.0" },
     { name = "pymupdf", marker = "extra == 'pageindex'", specifier = ">=1.24.0" },
     { name = "pymupdf", marker = "extra == 'text-extractor'", specifier = ">=1.24.0" },
     { name = "pymupdf4llm", marker = "extra == 'text-extractor'" },
     { name = "pypdf2", marker = "extra == 'pageindex'", specifier = ">=3.0.1" },
+    { name = "pytesseract", marker = "extra == 'text-extractor'", specifier = ">=0.3.13" },
     { name = "python-multipart", marker = "extra == 'server'", specifier = ">=0.0.20" },
     { name = "tiktoken", marker = "extra == 'pageindex'", specifier = ">=0.7.0" },
     { name = "tqdm", specifier = ">=4.67.2" },
@@ -1269,6 +1273,19 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/9f/bb/18dc3062d37db6c491392007dfd1a7f524bb95886eb956569ac38a23a784/PyPDF2-3.0.1.tar.gz", hash = "sha256:a74408f69ba6271f71b9352ef4ed03dc53a31aa404d29b5d31f53bfecfee1440", size = 227419, upload-time = "2022-12-31T10:36:13.13Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/8e/5e/c86a5643653825d3c913719e788e41386bee415c2b87b4f955432f2de6b2/pypdf2-3.0.1-py3-none-any.whl", hash = "sha256:d16e4205cfee272fbdc0568b68d82be796540b1537508cef59388f839c191928", size = 232572, upload-time = "2022-12-31T10:36:10.327Z" },
+]
+
+[[package]]
+name = "pytesseract"
+version = "0.3.13"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "packaging" },
+    { name = "pillow" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/9f/a6/7d679b83c285974a7cb94d739b461fa7e7a9b17a3abfd7bf6cbc5c2394b0/pytesseract-0.3.13.tar.gz", hash = "sha256:4bf5f880c99406f52a3cfc2633e42d9dc67615e69d8a509d74867d3baddb5db9", size = 17689, upload-time = "2024-08-16T02:33:56.762Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/7a/33/8312d7ce74670c9d39a532b2c246a853861120486be9443eebf048043637/pytesseract-0.3.13-py3-none-any.whl", hash = "sha256:7a99c6c2ac598360693d83a416e36e0b33a67638bb9d77fdcac094a3589d4b34", size = 14705, upload-time = "2024-08-16T02:36:10.09Z" },
 ]
 
 [[package]]
