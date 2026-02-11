@@ -1,4 +1,4 @@
-# DoD (Document Digestion Layer)
+# DoD (Document Outline Discovery)
 
 DoD turns a document into:
 
@@ -26,6 +26,24 @@ Core flow:
 - `conf/config.yaml` - default configuration
 - `examples/` - sample documents
 
+## 0. LLM API Configuration Required
+
+Before running either the CLI package mode or the server mode, set an OpenAI-compatible endpoint and API key:
+
+```bash
+export PAGEINDEX_API_KEY="<your_api_key>"
+export PAGEINDEX_BASE_URL="<your_openai_compatible_base_url>"
+```
+
+Example (Snowflake Cortex):
+
+```bash
+export PAGEINDEX_API_KEY="<snowflake_pat>"
+export PAGEINDEX_BASE_URL="https://<account-identifier>.snowflakecomputing.com/api/v2/cortex/v1"
+```
+
+Then choose any model available on your configured endpoint via `toc.model`.
+
 ## Setup
 
 ```bash
@@ -40,7 +58,7 @@ Install server extras when using API mode:
 uv pip install -e ".[server]"
 ```
 
-## 1) Run As A Package (CLI)
+## 1. Run As A Package CLI
 
 Run one document:
 
@@ -64,20 +82,9 @@ Main artifact files:
 - `toc_tree.json`
 - `manifest.json`
 
-## Snowflake Cortex (OpenAI-Compatible)
+## 2. Run As A Server
 
-Set environment variables once before CLI or server runs:
-
-```bash
-export PAGEINDEX_API_KEY="<snowflake_pat>"
-export PAGEINDEX_BASE_URL="https://<account-identifier>.snowflakecomputing.com/api/v2/cortex/v1"
-```
-
-Then choose any model available in your Snowflake account via `toc.model`.
-
-## 2) Run As A Server
-
-Start server:
+### 2.1 Start server
 
 ```bash
 export DOD_SERVER_HOST=0.0.0.0
@@ -87,15 +94,15 @@ export DOD_SERVER_WORK_DIR=outputs/server_jobs
 uv run python -m scripts.server
 ```
 
-Health check:
+### 2.2 Health check
 
 ```bash
 curl http://localhost:8000/healthz
 ```
 
-## 3) Make Requests
+### 2.3 Make requests
 
-### 3.1 Single PDF (wait for final result)
+#### 2.3.1 Single PDF wait for final result
 
 ```bash
 curl -s -X POST "http://localhost:8000/v1/digest" \
@@ -109,7 +116,7 @@ curl -s -X POST "http://localhost:8000/v1/digest" \
 
 This call blocks until the job is done and writes full result JSON to `result.json`.
 
-### 3.2 Async job (submit, then poll)
+#### 2.3.2 Async job submit then poll
 
 Submit:
 
@@ -133,7 +140,7 @@ Get final result:
 curl -s "http://localhost:8000/v1/jobs/$JOB_ID/result" > result.json
 ```
 
-### 3.3 Process More Than One PDF At The Same Time
+#### 2.3.3 Process More Than One PDF At The Same Time
 
 Use async submit (`wait=false`) + parallel curl:
 
@@ -173,9 +180,9 @@ Notes:
 - Server-side processing concurrency is capped by `DOD_SERVER_MAX_CONCURRENT_DOCS`.
 - TOC runs in strict mode: if PageIndex fails, the job status becomes `failed` (no fallback TOC).
 
-## 4) Output: What And Where
+## 3. Output What And Where
 
-### 4.1 Output in API response JSON
+### 3.1 Output in API response JSON
 
 `/v1/digest` (sync) or `/v1/jobs/{job_id}/result` returns:
 
@@ -193,7 +200,7 @@ jq -c '.result.image_page_table[]' result.json > image_page_table.jsonl
 jq '.result.toc_tree' result.json > toc_tree.json
 ```
 
-### 4.2 Output on disk (Server mode)
+### 3.2 Output on disk Server mode
 
 For each job:
 
@@ -208,7 +215,7 @@ Inside `artifacts/`:
 - `toc_tree.json`
 - `manifest.json`
 
-## Request Fields (Server `/v1/digest`)
+## 4. Request Fields Server `/v1/digest`
 
 Multipart form fields:
 
