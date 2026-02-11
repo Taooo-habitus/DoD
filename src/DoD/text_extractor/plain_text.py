@@ -1,4 +1,4 @@
-"""Plain text extractor for Markdown or TXT files."""
+"""Plain text extractor for TXT files."""
 
 from __future__ import annotations
 

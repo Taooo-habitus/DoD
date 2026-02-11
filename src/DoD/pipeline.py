@@ -176,7 +176,7 @@ def _select_extractor(cfg: PipelineConfig, input_path: Path):
     backend = cfg.text_extractor.backend.lower()
     suffix = input_path.suffix.lower()
 
-    if suffix in {".md", ".txt"}:
+    if suffix == ".txt":
         return PlainTextExtractor()
 
     if backend == "dummy":
