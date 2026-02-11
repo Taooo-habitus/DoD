@@ -25,6 +25,8 @@ def main(cfg: PipelineConfig) -> None:
         level=getattr(logging, cfg.logging_level.upper(), logging.INFO),
         format="%(asctime)s %(levelname)s %(name)s - %(message)s",
     )
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.getLogger("httpcore").setLevel(logging.WARNING)
     logging.info("Starting document digestion.")
     artifacts = digest_document(cfg)
     logging.info("Config: %s", OmegaConf.to_container(cfg, resolve=True))

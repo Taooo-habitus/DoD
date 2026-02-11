@@ -13,7 +13,7 @@ normalize:
 
 text_extractor:
   backend: "pytesseract"
-  batch: 10
+  batch: 50
 
 page_table:
   include_metadata: true

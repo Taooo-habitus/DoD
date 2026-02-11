@@ -162,7 +162,7 @@ async def check_title_appearance_in_start(
     response = await ChatGPT_API_async(model=model, prompt=prompt)
     response = extract_json(response)
     if logger:
-        logger.info(f"Response: {response}")
+        logger.debug(f"Response: {response}")
     return response.get("start_begin", "no")
 
 

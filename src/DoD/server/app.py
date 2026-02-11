@@ -192,6 +192,8 @@ async def _lifespan(_app: FastAPI):
             format="%(asctime)s %(levelname)s %(name)s - %(message)s",
         )
     logging.getLogger("DoD").setLevel(logging.INFO)
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.getLogger("httpcore").setLevel(logging.WARNING)
     work_dir = Path(os.getenv("DOD_SERVER_WORK_DIR", "outputs/server_jobs")).resolve()
     work_dir.mkdir(parents=True, exist_ok=True)
     _app.state.work_dir = work_dir
