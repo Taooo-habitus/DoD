@@ -262,9 +262,15 @@ uv run dod-mcp
 
 ### 5.4 Available MCP tools
 
+- `list_jobs()`
+  - Returns: `{ jobs: [{ file_name, job_id, job_ref, status, created_at }] }`.
 - `get_toc(job_ref)`
   - Returns: `{ job_id, job_ref, status, toc_tree }`.
-- `get_page_texts(job_ref, page_ids, start_page, end_page, max_chars_per_page)`
-  - Returns: `{ job_id, job_ref, status, pages }` where `pages` is a selected subset of `{ page_id, text }`.
-- `get_page_images(job_ref, page_ids, start_page, end_page, mode)`
-  - Returns: `{ job_id, job_ref, status, mode, pages }` where `pages` is a selected subset of `{ page_id, image_path }` (`mode=path`) or `{ page_id, image_b64 }` (`mode=base64`).
+- `get_page_texts(job_ref, pages)`
+  - Returns: `{ job_id, job_ref, status, requested_pages, returned_pages, pages }` where `pages` is a selected subset of `{ page_id, text }`.
+- `get_page_images(job_ref, pages, mode)`
+  - Returns: `{ job_id, job_ref, status, mode, requested_pages, returned_pages, pages }` where `pages` is a selected subset of `{ page_id, image_path }` (`mode=path`) or `{ page_id, image_b64 }` (`mode=base64`).
+- `pages` accepts flexible specs like `"110,111,89-100"`.
+- Retrieval guardrails come from `conf/config.yaml` under `retrieval`:
+  - `max_chars_per_page` (`null` means full page text)
+  - `max_pages_per_call`

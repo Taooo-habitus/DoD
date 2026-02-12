@@ -29,6 +29,7 @@ class JobRecord:
 
     job_id: str
     job_ref: str
+    file_name: str
     status: str
     created_at: str
     updated_at: str
@@ -170,6 +171,30 @@ def _resolve_page_selection(
     if any(page_id <= 0 for page_id in selected):
         raise ValueError("Page ids must be positive integers.")
     return [page_id for page_id in selected if page_id <= total_pages]
+
+
+def _format_page_ranges(page_numbers: List[int]) -> str:
+    """Format page numbers as compact ranges, e.g. '1-3,7,9-10'."""
+    if not page_numbers:
+        return ""
+    sorted_pages = sorted(set(page_numbers))
+    ranges: List[str] = []
+    start = sorted_pages[0]
+    end = sorted_pages[0]
+    for page in sorted_pages[1:]:
+        if page == end + 1:
+            end = page
+            continue
+        if start == end:
+            ranges.append(str(start))
+        else:
+            ranges.append(f"{start}-{end}")
+        start = end = page
+    if start == end:
+        ranges.append(str(start))
+    else:
+        ranges.append(f"{start}-{end}")
+    return ",".join(ranges)
 
 
 def _build_pipeline_config(
@@ -369,6 +394,7 @@ async def digest(
         app.state.jobs[job_id] = JobRecord(
             job_id=job_id,
             job_ref=job_ref,
+            file_name=filename,
             status="queued",
             created_at=now,
             updated_at=now,
@@ -396,8 +422,30 @@ async def digest(
     return {
         "job_id": job.job_id,
         "job_ref": job.job_ref,
+        "file_name": job.file_name,
         "status": job.status,
         "result": job.result,
+    }
+
+
+@app.get("/v1/jobs")
+async def list_jobs() -> Dict[str, Any]:
+    """List submitted jobs with compact metadata."""
+    async with app.state.jobs_lock:
+        jobs = list(app.state.jobs.values())
+
+    jobs.sort(key=lambda job: job.created_at, reverse=True)
+    return {
+        "jobs": [
+            {
+                "job_id": job.job_id,
+                "job_ref": job.job_ref,
+                "file_name": job.file_name,
+                "status": job.status,
+                "created_at": job.created_at,
+            }
+            for job in jobs
+        ]
     }
 
 
@@ -408,6 +456,7 @@ async def get_job(job_ref_or_id: str) -> Dict[str, Any]:
     return {
         "job_id": job.job_id,
         "job_ref": job.job_ref,
+        "file_name": job.file_name,
         "status": job.status,
         "created_at": job.created_at,
         "updated_at": job.updated_at,
@@ -432,6 +481,7 @@ async def get_job_result(job_ref_or_id: str) -> Dict[str, Any]:
     return {
         "job_id": job.job_id,
         "job_ref": job.job_ref,
+        "file_name": job.file_name,
         "status": job.status,
         "result": job.result,
     }
@@ -468,6 +518,7 @@ async def get_doc_page_texts(
     start_page: Optional[int] = Query(default=None),
     end_page: Optional[int] = Query(default=None),
     max_chars_per_page: Optional[int] = Query(default=None),
+    max_pages_per_call: int = Query(default=8, ge=1),
 ) -> Dict[str, Any]:
     """Return selected page text rows from page_table artifact."""
     job = await _get_job_or_404(job_ref)
@@ -477,20 +528,21 @@ async def get_doc_page_texts(
         raise HTTPException(status_code=500, detail="Page table artifact not found.")
     rows = _read_jsonl(page_table_path)
     try:
-        selected = set(
-            _resolve_page_selection(
-                total_pages=len(rows),
-                page_ids=page_ids,
-                start_page=start_page,
-                end_page=end_page,
-            )
+        selected = _resolve_page_selection(
+            total_pages=len(rows),
+            page_ids=page_ids,
+            start_page=start_page,
+            end_page=end_page,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    requested_pages = _format_page_ranges(selected)
+    selected_pages = set(selected[:max_pages_per_call])
+    returned_pages = _format_page_ranges(selected[:max_pages_per_call])
     output_rows: List[Dict[str, Any]] = []
     for row in rows:
         page_id = row.get("page_id")
-        if not isinstance(page_id, int) or page_id not in selected:
+        if not isinstance(page_id, int) or page_id not in selected_pages:
             continue
         text = row.get("text")
         if isinstance(text, str) and isinstance(max_chars_per_page, int):
@@ -500,6 +552,8 @@ async def get_doc_page_texts(
         "job_id": job.job_id,
         "job_ref": job.job_ref,
         "status": job.status,
+        "requested_pages": requested_pages,
+        "returned_pages": returned_pages,
         "pages": output_rows,
     }
 
@@ -511,6 +565,7 @@ async def get_doc_page_images(
     start_page: Optional[int] = Query(default=None),
     end_page: Optional[int] = Query(default=None),
     mode: str = Query(default="path"),
+    max_pages_per_call: int = Query(default=4, ge=1),
 ) -> Dict[str, Any]:
     """Return selected page image rows from image_page_table artifact."""
     if mode not in {"path", "base64"}:
@@ -524,20 +579,21 @@ async def get_doc_page_images(
         )
     rows = _read_jsonl(image_page_table_path)
     try:
-        selected = set(
-            _resolve_page_selection(
-                total_pages=len(rows),
-                page_ids=page_ids,
-                start_page=start_page,
-                end_page=end_page,
-            )
+        selected = _resolve_page_selection(
+            total_pages=len(rows),
+            page_ids=page_ids,
+            start_page=start_page,
+            end_page=end_page,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    requested_pages = _format_page_ranges(selected)
+    selected_pages = set(selected[:max_pages_per_call])
+    returned_pages = _format_page_ranges(selected[:max_pages_per_call])
     output_rows: List[Dict[str, Any]] = []
     for row in rows:
         page_id = row.get("page_id")
-        if not isinstance(page_id, int) or page_id not in selected:
+        if not isinstance(page_id, int) or page_id not in selected_pages:
             continue
         if mode == "base64":
             output_rows.append(
@@ -551,6 +607,8 @@ async def get_doc_page_images(
         "job_id": job.job_id,
         "job_ref": job.job_ref,
         "status": job.status,
+        "requested_pages": requested_pages,
+        "returned_pages": returned_pages,
         "mode": mode,
         "pages": output_rows,
     }

@@ -50,6 +50,14 @@ class TocConfig:
 
 
 @dataclass
+class RetrievalConfig:
+    """Settings for agent-facing artifact retrieval endpoints."""
+
+    max_chars_per_page: Optional[int] = None
+    max_pages_per_call: int = 8
+
+
+@dataclass
 class ArtifactConfig:
     """Output artifact filenames."""
 
@@ -71,4 +79,5 @@ class PipelineConfig:
     text_extractor: TextExtractorConfig = field(default_factory=TextExtractorConfig)
     page_table: PageTableConfig = field(default_factory=PageTableConfig)
     toc: TocConfig = field(default_factory=TocConfig)
+    retrieval: RetrievalConfig = field(default_factory=RetrievalConfig)
     artifacts: ArtifactConfig = field(default_factory=ArtifactConfig)

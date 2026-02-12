@@ -142,6 +142,52 @@ def test_unknown_job_returns_404(client: TestClient) -> None:
     assert response.status_code == 404
 
 
+def test_list_jobs_returns_submitted_jobs(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Job listing endpoint should expose compact metadata for all jobs."""
+
+    def fake_digest_document(_cfg):
+        time.sleep(0.05)
+        return {
+            "manifest": "manifest.json",
+            "page_table": "page_table.jsonl",
+            "toc_tree": "toc_tree.json",
+        }
+
+    monkeypatch.setattr(server_app, "digest_document", fake_digest_document)
+    monkeypatch.setattr(
+        server_app,
+        "_build_result_payload",
+        lambda _artifacts: {"toc_tree": {}, "page_table": [], "image_page_table": []},
+    )
+
+    resp1 = client.post(
+        "/v1/digest?wait=false",
+        files={"file": ("alpha.pdf", b"%PDF-1.4\nfake", "application/pdf")},
+    )
+    assert resp1.status_code == 200
+    resp2 = client.post(
+        "/v1/digest?wait=false",
+        files={"file": ("beta.pdf", b"%PDF-1.4\nfake", "application/pdf")},
+    )
+    assert resp2.status_code == 200
+
+    listed = client.get("/v1/jobs")
+    assert listed.status_code == 200
+    jobs = listed.json()["jobs"]
+    assert len(jobs) >= 2
+    by_name = {job["file_name"]: job for job in jobs}
+    assert "alpha.pdf" in by_name
+    assert "beta.pdf" in by_name
+    for file_name in ("alpha.pdf", "beta.pdf"):
+        item = by_name[file_name]
+        assert isinstance(item["job_id"], str)
+        assert isinstance(item["job_ref"], str)
+        assert item["status"] in {"queued", "running", "succeeded", "failed"}
+        assert isinstance(item["created_at"], str)
+
+
 def test_digest_sync_failure_returns_500(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -283,6 +329,8 @@ def test_doc_endpoints_return_selected_outputs(
         params={"start_page": 2, "end_page": 3, "max_chars_per_page": 3},
     )
     assert text_resp.status_code == 200
+    assert text_resp.json()["requested_pages"] == "2-3"
+    assert text_resp.json()["returned_pages"] == "2-3"
     assert text_resp.json()["pages"] == [
         {"page_id": 2, "text": "bra"},
         {"page_id": 3, "text": "cha"},
@@ -293,7 +341,95 @@ def test_doc_endpoints_return_selected_outputs(
     )
     assert image_resp.status_code == 200
     assert image_resp.json()["mode"] == "path"
+    assert image_resp.json()["requested_pages"] == "1,3"
+    assert image_resp.json()["returned_pages"] == "1,3"
     assert image_resp.json()["pages"] == [
         {"page_id": 1, "image_path": "p1.png"},
         {"page_id": 3, "image_path": "p3.png"},
     ]
+
+
+def test_doc_endpoints_honor_max_pages_per_call(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Page endpoints should cap returned pages and report requested ranges."""
+    page_table_path = tmp_path / "page_table.jsonl"
+    image_page_table_path = tmp_path / "image_page_table.jsonl"
+    toc_tree_path = tmp_path / "toc_tree.json"
+    manifest_path = tmp_path / "manifest.json"
+
+    page_table_path.write_text(
+        "\n".join(
+            [json.dumps({"page_id": i, "text": f"text-{i}"}) for i in range(1, 7)]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    image_page_table_path.write_text(
+        "\n".join(
+            [
+                json.dumps(
+                    {"page_id": i, "image_path": f"p{i}.png", "image_b64": f"b64-{i}"}
+                )
+                for i in range(1, 7)
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    toc_tree_path.write_text(
+        json.dumps({"doc_name": "doc", "structure": [{"title": "A"}]}), encoding="utf-8"
+    )
+    manifest_path.write_text(
+        json.dumps(
+            {
+                "artifacts": {
+                    "page_table": str(page_table_path),
+                    "image_page_table": str(image_page_table_path),
+                    "toc_tree": str(toc_tree_path),
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    def fake_digest_document(_cfg):
+        return {
+            "manifest": str(manifest_path),
+            "page_table": str(page_table_path),
+            "image_page_table": str(image_page_table_path),
+            "toc_tree": str(toc_tree_path),
+        }
+
+    monkeypatch.setattr(server_app, "digest_document", fake_digest_document)
+
+    submit = client.post(
+        "/v1/digest?wait=false",
+        files={"file": ("doc.pdf", b"%PDF-1.4\nfake", "application/pdf")},
+    )
+    assert submit.status_code == 200
+    job_ref = submit.json()["job_ref"]
+    _wait_for_result(client, submit.json()["job_id"])
+
+    text_resp = client.get(
+        f"/v1/docs/{job_ref}/pages/text",
+        params={"start_page": 2, "end_page": 6, "max_pages_per_call": 3},
+    )
+    assert text_resp.status_code == 200
+    assert text_resp.json()["requested_pages"] == "2-6"
+    assert text_resp.json()["returned_pages"] == "2-4"
+    assert [row["page_id"] for row in text_resp.json()["pages"]] == [2, 3, 4]
+
+    image_resp = client.get(
+        f"/v1/docs/{job_ref}/pages/images",
+        params={
+            "start_page": 1,
+            "end_page": 6,
+            "max_pages_per_call": 2,
+            "mode": "path",
+        },
+    )
+    assert image_resp.status_code == 200
+    assert image_resp.json()["requested_pages"] == "1-6"
+    assert image_resp.json()["returned_pages"] == "1-2"
+    assert [row["page_id"] for row in image_resp.json()["pages"]] == [1, 2]
