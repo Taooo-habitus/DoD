@@ -85,6 +85,44 @@ def _read_jsonl(path: Path) -> List[Dict[str, Any]]:
     return rows
 
 
+def _resolve_artifact_path(job: JobRecord, artifact_key: str) -> Optional[Path]:
+    """Resolve an artifact path from job state, result payload, or manifest."""
+    candidates: List[Path] = []
+
+    direct_value = job.artifacts.get(artifact_key)
+    if isinstance(direct_value, str) and direct_value.strip():
+        candidates.append(Path(direct_value))
+
+    result_paths = (
+        job.result.get("artifact_paths", {}) if isinstance(job.result, dict) else {}
+    )
+    if isinstance(result_paths, dict):
+        result_value = result_paths.get(artifact_key)
+        if isinstance(result_value, str) and result_value.strip():
+            candidates.append(Path(result_value))
+
+    manifest_value = job.artifacts.get("manifest")
+    if isinstance(manifest_value, str) and manifest_value.strip():
+        manifest_path = Path(manifest_value)
+        if manifest_path.exists() and manifest_path.is_file():
+            try:
+                manifest = read_json(manifest_path)
+            except Exception:  # noqa: BLE001 - endpoint handles missing artifact below
+                manifest = {}
+            artifacts_map = (
+                manifest.get("artifacts", {}) if isinstance(manifest, dict) else {}
+            )
+            if isinstance(artifacts_map, dict):
+                nested_value = artifacts_map.get(artifact_key)
+                if isinstance(nested_value, str) and nested_value.strip():
+                    candidates.append(Path(nested_value))
+
+    for candidate in candidates:
+        if candidate.exists() and candidate.is_file():
+            return candidate
+    return None
+
+
 def _build_result_payload(artifacts: Dict[str, str]) -> Dict[str, Any]:
     """Load generated artifacts into API-friendly response payload."""
     manifest_path = Path(artifacts["manifest"])
@@ -324,7 +362,15 @@ async def _run_job(job_id: str, cfg: PipelineConfig) -> None:
                 job = app.state.jobs[job_id]
                 job.status = "succeeded"
                 job.updated_at = _now_utc_iso()
-                job.artifacts = artifacts
+                artifact_paths = (
+                    result.get("artifact_paths", {}) if isinstance(result, dict) else {}
+                )
+                merged_artifacts = dict(artifacts)
+                if isinstance(artifact_paths, dict):
+                    for key, value in artifact_paths.items():
+                        if isinstance(value, str):
+                            merged_artifacts[key] = value
+                job.artifacts = merged_artifacts
                 job.result = result
         except Exception as exc:  # noqa: BLE001 - server should return job failure
             async with app.state.jobs_lock:
@@ -500,8 +546,8 @@ async def get_doc_toc(job_ref: str) -> Dict[str, Any]:
     """Return TOC tree for a completed job."""
     job = await _get_job_or_404(job_ref)
     _ensure_job_succeeded(job)
-    toc_path = Path(job.artifacts.get("toc_tree", ""))
-    if not toc_path.exists():
+    toc_path = _resolve_artifact_path(job, "toc_tree")
+    if toc_path is None:
         raise HTTPException(status_code=500, detail="TOC artifact not found.")
     return {
         "job_id": job.job_id,
@@ -523,8 +569,8 @@ async def get_doc_page_texts(
     """Return selected page text rows from page_table artifact."""
     job = await _get_job_or_404(job_ref)
     _ensure_job_succeeded(job)
-    page_table_path = Path(job.artifacts.get("page_table", ""))
-    if not page_table_path.exists():
+    page_table_path = _resolve_artifact_path(job, "page_table")
+    if page_table_path is None:
         raise HTTPException(status_code=500, detail="Page table artifact not found.")
     rows = _read_jsonl(page_table_path)
     try:
@@ -572,8 +618,8 @@ async def get_doc_page_images(
         raise HTTPException(status_code=400, detail="mode must be 'path' or 'base64'.")
     job = await _get_job_or_404(job_ref)
     _ensure_job_succeeded(job)
-    image_page_table_path = Path(job.artifacts.get("image_page_table", ""))
-    if not image_page_table_path.exists():
+    image_page_table_path = _resolve_artifact_path(job, "image_page_table")
+    if image_page_table_path is None:
         raise HTTPException(
             status_code=500, detail="Image page table artifact not found."
         )

@@ -433,3 +433,63 @@ def test_doc_endpoints_honor_max_pages_per_call(
     assert image_resp.json()["requested_pages"] == "1-6"
     assert image_resp.json()["returned_pages"] == "1-2"
     assert [row["page_id"] for row in image_resp.json()["pages"]] == [1, 2]
+
+
+def test_doc_image_endpoint_resolves_path_from_manifest(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Image endpoint should resolve path even if job.artifacts lacks the key."""
+    page_table_path = tmp_path / "page_table.jsonl"
+    image_page_table_path = tmp_path / "image_page_table.jsonl"
+    toc_tree_path = tmp_path / "toc_tree.json"
+    manifest_path = tmp_path / "manifest.json"
+
+    page_table_path.write_text(
+        json.dumps({"page_id": 1, "text": "alpha"}) + "\n", encoding="utf-8"
+    )
+    image_page_table_path.write_text(
+        json.dumps({"page_id": 1, "image_path": "p1.png", "image_b64": "a"}) + "\n",
+        encoding="utf-8",
+    )
+    toc_tree_path.write_text(
+        json.dumps({"doc_name": "doc", "structure": []}), encoding="utf-8"
+    )
+    manifest_path.write_text(
+        json.dumps(
+            {
+                "artifacts": {
+                    "page_table": str(page_table_path),
+                    "image_page_table": str(image_page_table_path),
+                    "toc_tree": str(toc_tree_path),
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    def fake_digest_document(_cfg):
+        return {
+            "manifest": str(manifest_path),
+            "page_table": str(page_table_path),
+            "toc_tree": str(toc_tree_path),
+        }
+
+    def fake_build_result_payload(_artifacts):
+        return {"toc_tree": {}, "page_table": [], "image_page_table": []}
+
+    monkeypatch.setattr(server_app, "digest_document", fake_digest_document)
+    monkeypatch.setattr(server_app, "_build_result_payload", fake_build_result_payload)
+
+    submit = client.post(
+        "/v1/digest?wait=false",
+        files={"file": ("doc.pdf", b"%PDF-1.4\nfake", "application/pdf")},
+    )
+    assert submit.status_code == 200
+    job_ref = submit.json()["job_ref"]
+    _wait_for_result(client, submit.json()["job_id"])
+
+    image_resp = client.get(
+        f"/v1/docs/{job_ref}/pages/images", params={"page_ids": "1", "mode": "path"}
+    )
+    assert image_resp.status_code == 200
+    assert image_resp.json()["pages"] == [{"page_id": 1, "image_path": "p1.png"}]
