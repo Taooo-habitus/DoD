@@ -13,6 +13,11 @@ dependencies = [
 ]
 requires-python = ">= 3.11"
 
+[project.scripts]
+dod = "scripts.main:main"
+dod-server = "scripts.server:main"
+dod-mcp = "scripts.dod_mcp:main"
+
 [project.optional-dependencies]
 pageindex = [
     "openai>=1.0.0",
@@ -30,6 +35,10 @@ server = [
     "fastapi>=0.116.0",
     "python-multipart>=0.0.20",
     "uvicorn>=0.35.0",
+]
+mcp = [
+    "mcp>=1.12.4",
+    "httpx>=0.28.1",
 ]
 pdf = [
     "pdf2image>=1.17.0",

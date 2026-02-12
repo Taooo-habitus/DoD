@@ -108,10 +108,14 @@ def test_digest_async_flow(client: TestClient, monkeypatch: pytest.MonkeyPatch) 
     )
     assert submit.status_code == 200
     job_id = submit.json()["job_id"]
+    job_ref = submit.json()["job_ref"]
 
     result = _wait_for_result(client, job_id)
     assert result["status"] == "succeeded"
     assert "result" in result
+    by_ref = client.get(f"/v1/jobs/{job_ref}")
+    assert by_ref.status_code == 200
+    assert by_ref.json()["job_id"] == job_id
 
 
 def test_digest_rejects_non_pdf(client: TestClient) -> None:
@@ -203,3 +207,93 @@ def test_build_result_payload_reads_artifacts(tmp_path: Path) -> None:
     assert payload["toc_tree"]["doc_name"] == "doc"
     assert len(payload["page_table"]) == 2
     assert len(payload["image_page_table"]) == 1
+
+
+def test_doc_endpoints_return_selected_outputs(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """TOC/text/image endpoints should return selected subsets for a completed job."""
+    page_table_path = tmp_path / "page_table.jsonl"
+    image_page_table_path = tmp_path / "image_page_table.jsonl"
+    toc_tree_path = tmp_path / "toc_tree.json"
+    manifest_path = tmp_path / "manifest.json"
+
+    page_table_path.write_text(
+        "\n".join(
+            [
+                json.dumps({"page_id": 1, "text": "alpha"}),
+                json.dumps({"page_id": 2, "text": "bravo"}),
+                json.dumps({"page_id": 3, "text": "charlie"}),
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    image_page_table_path.write_text(
+        "\n".join(
+            [
+                json.dumps({"page_id": 1, "image_path": "p1.png", "image_b64": "a"}),
+                json.dumps({"page_id": 2, "image_path": "p2.png", "image_b64": "b"}),
+                json.dumps({"page_id": 3, "image_path": "p3.png", "image_b64": "c"}),
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    toc_tree_path.write_text(
+        json.dumps({"doc_name": "doc", "structure": [{"title": "A"}]}), encoding="utf-8"
+    )
+    manifest_path.write_text(
+        json.dumps(
+            {
+                "artifacts": {
+                    "page_table": str(page_table_path),
+                    "image_page_table": str(image_page_table_path),
+                    "toc_tree": str(toc_tree_path),
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    def fake_digest_document(_cfg):
+        return {
+            "manifest": str(manifest_path),
+            "page_table": str(page_table_path),
+            "image_page_table": str(image_page_table_path),
+            "toc_tree": str(toc_tree_path),
+        }
+
+    monkeypatch.setattr(server_app, "digest_document", fake_digest_document)
+
+    submit = client.post(
+        "/v1/digest?wait=false",
+        files={"file": ("doc.pdf", b"%PDF-1.4\nfake", "application/pdf")},
+    )
+    assert submit.status_code == 200
+    job_ref = submit.json()["job_ref"]
+    _wait_for_result(client, submit.json()["job_id"])
+
+    toc_resp = client.get(f"/v1/docs/{job_ref}/toc")
+    assert toc_resp.status_code == 200
+    assert toc_resp.json()["toc_tree"]["doc_name"] == "doc"
+
+    text_resp = client.get(
+        f"/v1/docs/{job_ref}/pages/text",
+        params={"start_page": 2, "end_page": 3, "max_chars_per_page": 3},
+    )
+    assert text_resp.status_code == 200
+    assert text_resp.json()["pages"] == [
+        {"page_id": 2, "text": "bra"},
+        {"page_id": 3, "text": "cha"},
+    ]
+
+    image_resp = client.get(
+        f"/v1/docs/{job_ref}/pages/images", params={"page_ids": "1,3", "mode": "path"}
+    )
+    assert image_resp.status_code == 200
+    assert image_resp.json()["mode"] == "path"
+    assert image_resp.json()["pages"] == [
+        {"page_id": 1, "image_path": "p1.png"},
+        {"page_id": 3, "image_path": "p3.png"},
+    ]

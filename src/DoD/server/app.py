@@ -6,6 +6,7 @@ import asyncio
 import json
 import logging
 import os
+import re
 import uuid
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
@@ -27,6 +28,7 @@ class JobRecord:
     """In-memory job state for a single request."""
 
     job_id: str
+    job_ref: str
     status: str
     created_at: str
     updated_at: str
@@ -41,6 +43,20 @@ class JobRecord:
 def _now_utc_iso() -> str:
     """Return current UTC timestamp in ISO format."""
     return datetime.now(timezone.utc).isoformat()
+
+
+def _make_job_ref(filename: str, job_id: str, created_at: str) -> str:
+    """Create a human-readable job reference with uniqueness suffix."""
+    stem = Path(filename).stem.lower().strip()
+    stem = re.sub(r"[^a-z0-9]+", "-", stem).strip("-")
+    if not stem:
+        stem = "document"
+    try:
+        dt = datetime.fromisoformat(created_at)
+    except ValueError:
+        dt = datetime.now(timezone.utc)
+    timestamp = dt.strftime("%Y%m%d-%H%M%S")
+    return f"{stem}-{timestamp}-{job_id[:6]}"
 
 
 def _env_int(name: str, default: int) -> int:
@@ -117,6 +133,43 @@ def _format_profiling_summary(profiling: Dict[str, Any]) -> str:
             else ", ".join(suffix_parts)
         )
     return summary or "profiling unavailable"
+
+
+def _parse_page_ids(raw: Optional[str]) -> List[int]:
+    """Parse comma-separated page ids into sorted unique integers."""
+    if raw is None or not raw.strip():
+        return []
+    parsed: List[int] = []
+    for part in raw.split(","):
+        part = part.strip()
+        if not part:
+            continue
+        parsed.append(int(part))
+    return sorted(set(parsed))
+
+
+def _resolve_page_selection(
+    total_pages: int,
+    page_ids: Optional[str] = None,
+    start_page: Optional[int] = None,
+    end_page: Optional[int] = None,
+) -> List[int]:
+    """Resolve selected page ids from explicit ids or a closed range."""
+    if total_pages <= 0:
+        return []
+    if page_ids:
+        selected = _parse_page_ids(page_ids)
+    elif start_page is not None or end_page is not None:
+        start = 1 if start_page is None else start_page
+        end = total_pages if end_page is None else end_page
+        if start <= 0 or end <= 0 or start > end:
+            raise ValueError("Invalid page range.")
+        selected = list(range(start, end + 1))
+    else:
+        selected = list(range(1, total_pages + 1))
+    if any(page_id <= 0 for page_id in selected):
+        raise ValueError("Page ids must be positive integers.")
+    return [page_id for page_id in selected if page_id <= total_pages]
 
 
 def _build_pipeline_config(
@@ -202,6 +255,7 @@ async def _lifespan(_app: FastAPI):
     )
     _app.state.doc_semaphore = asyncio.Semaphore(_app.state.max_concurrent_docs)
     _app.state.jobs: Dict[str, JobRecord] = {}
+    _app.state.job_refs: Dict[str, str] = {}
     _app.state.jobs_lock = asyncio.Lock()
     yield
 
@@ -209,12 +263,18 @@ async def _lifespan(_app: FastAPI):
 app = FastAPI(title="DoD Server", version="0.1.0", lifespan=_lifespan)
 
 
-async def _get_job_or_404(job_id: str) -> JobRecord:
-    """Return a job record or raise 404."""
+async def _get_job_or_404(job_ref_or_id: str) -> JobRecord:
+    """Return a job record from a UUID or job_ref, else raise 404."""
     async with app.state.jobs_lock:
-        job = app.state.jobs.get(job_id)
+        job_id = app.state.jobs.get(job_ref_or_id)
+        if isinstance(job_id, JobRecord):
+            return job_id
+        resolved_job_id = app.state.job_refs.get(job_ref_or_id, job_ref_or_id)
+        job = app.state.jobs.get(resolved_job_id)
     if job is None:
-        raise HTTPException(status_code=404, detail=f"Unknown job_id: {job_id}")
+        raise HTTPException(
+            status_code=404, detail=f"Unknown job_ref or job_id: {job_ref_or_id}"
+        )
     return job
 
 
@@ -284,6 +344,7 @@ async def digest(
 
     job_id = uuid.uuid4().hex
     now = _now_utc_iso()
+    job_ref = _make_job_ref(filename, job_id, now)
     job_dir = app.state.work_dir / job_id
     input_path = job_dir / f"input{suffix}"
     output_dir = job_dir / "artifacts"
@@ -307,6 +368,7 @@ async def digest(
     async with app.state.jobs_lock:
         app.state.jobs[job_id] = JobRecord(
             job_id=job_id,
+            job_ref=job_ref,
             status="queued",
             created_at=now,
             updated_at=now,
@@ -314,45 +376,181 @@ async def digest(
             output_dir=str(output_dir),
             task=task,
         )
+        app.state.job_refs[job_ref] = job_id
 
     if not wait:
         return {
             "job_id": job_id,
+            "job_ref": job_ref,
             "status": "queued",
             "status_url": f"/v1/jobs/{job_id}",
+            "status_ref_url": f"/v1/jobs/{job_ref}",
             "result_url": f"/v1/jobs/{job_id}/result",
+            "result_ref_url": f"/v1/jobs/{job_ref}/result",
         }
 
     await task
     job = await _get_job_or_404(job_id)
     if job.status == "failed":
         raise HTTPException(status_code=500, detail=job.error or "Job failed")
-    return {"job_id": job.job_id, "status": job.status, "result": job.result}
-
-
-@app.get("/v1/jobs/{job_id}")
-async def get_job(job_id: str) -> Dict[str, Any]:
-    """Get job status and metadata."""
-    job = await _get_job_or_404(job_id)
     return {
         "job_id": job.job_id,
+        "job_ref": job.job_ref,
+        "status": job.status,
+        "result": job.result,
+    }
+
+
+@app.get("/v1/jobs/{job_ref_or_id}")
+async def get_job(job_ref_or_id: str) -> Dict[str, Any]:
+    """Get job status and metadata."""
+    job = await _get_job_or_404(job_ref_or_id)
+    return {
+        "job_id": job.job_id,
+        "job_ref": job.job_ref,
         "status": job.status,
         "created_at": job.created_at,
         "updated_at": job.updated_at,
         "input_path": job.input_path,
         "output_dir": job.output_dir,
         "error": job.error,
-        "status_url": f"/v1/jobs/{job_id}",
-        "result_url": f"/v1/jobs/{job_id}/result",
+        "status_url": f"/v1/jobs/{job.job_id}",
+        "status_ref_url": f"/v1/jobs/{job.job_ref}",
+        "result_url": f"/v1/jobs/{job.job_id}/result",
+        "result_ref_url": f"/v1/jobs/{job.job_ref}/result",
     }
 
 
-@app.get("/v1/jobs/{job_id}/result")
-async def get_job_result(job_id: str) -> Dict[str, Any]:
+@app.get("/v1/jobs/{job_ref_or_id}/result")
+async def get_job_result(job_ref_or_id: str) -> Dict[str, Any]:
     """Get completed job output payload."""
-    job = await _get_job_or_404(job_id)
+    job = await _get_job_or_404(job_ref_or_id)
     if job.status in {"queued", "running"}:
         raise HTTPException(status_code=409, detail=f"Job is still {job.status}.")
     if job.status == "failed":
         raise HTTPException(status_code=500, detail=job.error or "Job failed")
-    return {"job_id": job.job_id, "status": job.status, "result": job.result}
+    return {
+        "job_id": job.job_id,
+        "job_ref": job.job_ref,
+        "status": job.status,
+        "result": job.result,
+    }
+
+
+def _ensure_job_succeeded(job: JobRecord) -> None:
+    """Raise HTTP errors when a job is not successfully completed."""
+    if job.status in {"queued", "running"}:
+        raise HTTPException(status_code=409, detail=f"Job is still {job.status}.")
+    if job.status == "failed":
+        raise HTTPException(status_code=500, detail=job.error or "Job failed")
+
+
+@app.get("/v1/docs/{job_ref}/toc")
+async def get_doc_toc(job_ref: str) -> Dict[str, Any]:
+    """Return TOC tree for a completed job."""
+    job = await _get_job_or_404(job_ref)
+    _ensure_job_succeeded(job)
+    toc_path = Path(job.artifacts.get("toc_tree", ""))
+    if not toc_path.exists():
+        raise HTTPException(status_code=500, detail="TOC artifact not found.")
+    return {
+        "job_id": job.job_id,
+        "job_ref": job.job_ref,
+        "status": job.status,
+        "toc_tree": read_json(toc_path),
+    }
+
+
+@app.get("/v1/docs/{job_ref}/pages/text")
+async def get_doc_page_texts(
+    job_ref: str,
+    page_ids: Optional[str] = Query(default=None),
+    start_page: Optional[int] = Query(default=None),
+    end_page: Optional[int] = Query(default=None),
+    max_chars_per_page: Optional[int] = Query(default=None),
+) -> Dict[str, Any]:
+    """Return selected page text rows from page_table artifact."""
+    job = await _get_job_or_404(job_ref)
+    _ensure_job_succeeded(job)
+    page_table_path = Path(job.artifacts.get("page_table", ""))
+    if not page_table_path.exists():
+        raise HTTPException(status_code=500, detail="Page table artifact not found.")
+    rows = _read_jsonl(page_table_path)
+    try:
+        selected = set(
+            _resolve_page_selection(
+                total_pages=len(rows),
+                page_ids=page_ids,
+                start_page=start_page,
+                end_page=end_page,
+            )
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    output_rows: List[Dict[str, Any]] = []
+    for row in rows:
+        page_id = row.get("page_id")
+        if not isinstance(page_id, int) or page_id not in selected:
+            continue
+        text = row.get("text")
+        if isinstance(text, str) and isinstance(max_chars_per_page, int):
+            text = text[: max(1, max_chars_per_page)]
+        output_rows.append({"page_id": page_id, "text": text})
+    return {
+        "job_id": job.job_id,
+        "job_ref": job.job_ref,
+        "status": job.status,
+        "pages": output_rows,
+    }
+
+
+@app.get("/v1/docs/{job_ref}/pages/images")
+async def get_doc_page_images(
+    job_ref: str,
+    page_ids: Optional[str] = Query(default=None),
+    start_page: Optional[int] = Query(default=None),
+    end_page: Optional[int] = Query(default=None),
+    mode: str = Query(default="path"),
+) -> Dict[str, Any]:
+    """Return selected page image rows from image_page_table artifact."""
+    if mode not in {"path", "base64"}:
+        raise HTTPException(status_code=400, detail="mode must be 'path' or 'base64'.")
+    job = await _get_job_or_404(job_ref)
+    _ensure_job_succeeded(job)
+    image_page_table_path = Path(job.artifacts.get("image_page_table", ""))
+    if not image_page_table_path.exists():
+        raise HTTPException(
+            status_code=500, detail="Image page table artifact not found."
+        )
+    rows = _read_jsonl(image_page_table_path)
+    try:
+        selected = set(
+            _resolve_page_selection(
+                total_pages=len(rows),
+                page_ids=page_ids,
+                start_page=start_page,
+                end_page=end_page,
+            )
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    output_rows: List[Dict[str, Any]] = []
+    for row in rows:
+        page_id = row.get("page_id")
+        if not isinstance(page_id, int) or page_id not in selected:
+            continue
+        if mode == "base64":
+            output_rows.append(
+                {"page_id": page_id, "image_b64": row.get("image_b64", "")}
+            )
+        else:
+            output_rows.append(
+                {"page_id": page_id, "image_path": row.get("image_path", "")}
+            )
+    return {
+        "job_id": job.job_id,
+        "job_ref": job.job_ref,
+        "status": job.status,
+        "mode": mode,
+        "pages": output_rows,
+    }

@@ -121,23 +121,25 @@ This call blocks until the job is done and writes full result JSON to `result.js
 Submit:
 
 ```bash
-JOB_ID=$(curl -s -X POST "http://localhost:8000/v1/digest?wait=false" \
+SUBMIT_JSON=$(curl -s -X POST "http://localhost:8000/v1/digest?wait=false" \
   -F "file=@examples/Paa-vej-til-dansk.pdf" \
   -F "text_extractor_backend=pymupdf" \
   -F "toc_backend=pageindex" \
-  -F "toc_model=claude-sonnet-4-5" | jq -r '.job_id')
+  -F "toc_model=claude-sonnet-4-5")
+JOB_ID=$(echo "$SUBMIT_JSON" | jq -r '.job_id')
+JOB_REF=$(echo "$SUBMIT_JSON" | jq -r '.job_ref')
 ```
 
 Check status:
 
 ```bash
-curl -s "http://localhost:8000/v1/jobs/$JOB_ID"
+curl -s "http://localhost:8000/v1/jobs/$JOB_REF"
 ```
 
 Get final result:
 
 ```bash
-curl -s "http://localhost:8000/v1/jobs/$JOB_ID/result" > result.json
+curl -s "http://localhost:8000/v1/jobs/$JOB_REF/result" > result.json
 ```
 
 #### 2.3.3 Process More Than One PDF At The Same Time
@@ -234,3 +236,35 @@ Query parameter:
 - `wait` (default `true`)
   - `true`: request returns when job finishes
   - `false`: request returns immediately with `job_id`
+
+## 5. Simple MCP Setup
+
+If you want agents to call DoD as tools, use the included MCP wrapper at `src/scripts/dod_mcp.py`.
+Agents do not upload PDFs. Human users submit jobs first via `/v1/digest`, then agents use `job_ref` to retrieve targeted outputs.
+
+### 5.1 Install MCP dependencies
+
+```bash
+uv pip install -e ".[mcp]"
+```
+
+### 5.2 Start DoD HTTP server
+
+```bash
+uv run dod-server
+```
+
+### 5.3 Run MCP server
+
+```bash
+uv run dod-mcp
+```
+
+### 5.4 Available MCP tools
+
+- `get_toc(job_ref)`
+  - Returns: `{ job_id, job_ref, status, toc_tree }`.
+- `get_page_texts(job_ref, page_ids, start_page, end_page, max_chars_per_page)`
+  - Returns: `{ job_id, job_ref, status, pages }` where `pages` is a selected subset of `{ page_id, text }`.
+- `get_page_images(job_ref, page_ids, start_page, end_page, mode)`
+  - Returns: `{ job_id, job_ref, status, mode, pages }` where `pages` is a selected subset of `{ page_id, image_path }` (`mode=path`) or `{ page_id, image_b64 }` (`mode=base64`).
