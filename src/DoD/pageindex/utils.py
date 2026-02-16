@@ -1,4 +1,7 @@
-"""Shared utilities for PageIndex."""
+"""Shared utilities for PageIndex.
+
+Adapted from VectifyAI/PageIndex (MIT License).
+"""
 
 from __future__ import annotations
 

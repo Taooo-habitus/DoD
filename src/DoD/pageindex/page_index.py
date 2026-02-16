@@ -1,4 +1,7 @@
-"""PDF PageIndex tree construction."""
+"""PDF PageIndex tree construction.
+
+Adapted from VectifyAI/PageIndex (MIT License).
+"""
 
 from __future__ import annotations
 
