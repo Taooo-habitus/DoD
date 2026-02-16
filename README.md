@@ -3,7 +3,7 @@
 DoD turns a document into:
 
 1. `page_table.jsonl` (page text + metadata)
-2. `toc_tree.json` (hierarchical TOC tree)
+2. `toc_tree.json` (hierarchical Table-of-Contents tree)
 3. `image_page_table.jsonl` (page-image index, including image paths and image payload fields)
 4. `images/` (all pages rendered as image files)
 
