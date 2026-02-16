@@ -17,7 +17,7 @@ from typing import Any, Dict, List, Optional
 from fastapi import FastAPI, File, Form, HTTPException, Query, UploadFile
 
 from DoD.config import PipelineConfig
-from DoD.io.artifacts import read_json
+from DoD.io.artifacts import read_json, write_json
 from DoD.pipeline import digest_document
 
 logger = logging.getLogger(__name__)
@@ -121,6 +121,130 @@ def _resolve_artifact_path(job: JobRecord, artifact_key: str) -> Optional[Path]:
         if candidate.exists() and candidate.is_file():
             return candidate
     return None
+
+
+def _jobs_state_path(work_dir: Path) -> Path:
+    """Return persistent job-state file path."""
+    return work_dir / "jobs.json"
+
+
+def _serialize_job(job: JobRecord) -> Dict[str, Any]:
+    """Serialize a JobRecord to JSON-safe payload."""
+    return {
+        "job_id": job.job_id,
+        "job_ref": job.job_ref,
+        "file_name": job.file_name,
+        "status": job.status,
+        "created_at": job.created_at,
+        "updated_at": job.updated_at,
+        "input_path": job.input_path,
+        "output_dir": job.output_dir,
+        "artifacts": job.artifacts,
+        "error": job.error,
+    }
+
+
+def _deserialize_job(payload: Dict[str, Any]) -> Optional[JobRecord]:
+    """Deserialize persisted payload into JobRecord."""
+    required = [
+        "job_id",
+        "job_ref",
+        "file_name",
+        "status",
+        "created_at",
+        "updated_at",
+        "input_path",
+        "output_dir",
+    ]
+    if any(key not in payload for key in required):
+        return None
+    status = payload["status"]
+    error = payload.get("error")
+    if status in {"queued", "running"}:
+        status = "failed"
+        error = error or "Server restarted before job completion."
+    return JobRecord(
+        job_id=str(payload["job_id"]),
+        job_ref=str(payload["job_ref"]),
+        file_name=str(payload["file_name"]),
+        status=str(status),
+        created_at=str(payload["created_at"]),
+        updated_at=str(payload.get("updated_at", payload["created_at"])),
+        input_path=str(payload["input_path"]),
+        output_dir=str(payload["output_dir"]),
+        artifacts=(
+            payload.get("artifacts", {})
+            if isinstance(payload.get("artifacts"), dict)
+            else {}
+        ),
+        result=None,
+        error=str(error) if isinstance(error, str) else None,
+        task=None,
+    )
+
+
+def _load_jobs_state(work_dir: Path) -> tuple[Dict[str, JobRecord], Dict[str, str]]:
+    """Load persisted jobs from disk."""
+    state_path = _jobs_state_path(work_dir)
+    if not state_path.exists():
+        return {}, {}
+    try:
+        payload = read_json(state_path)
+    except Exception:  # noqa: BLE001 - boot should continue without persisted state
+        logger.warning("Failed to load persisted jobs state from %s.", state_path)
+        return {}, {}
+    raw_jobs = payload.get("jobs", []) if isinstance(payload, dict) else []
+    jobs: Dict[str, JobRecord] = {}
+    job_refs: Dict[str, str] = {}
+    if not isinstance(raw_jobs, list):
+        return {}, {}
+    for item in raw_jobs:
+        if not isinstance(item, dict):
+            continue
+        job = _deserialize_job(item)
+        if job is None:
+            continue
+        jobs[job.job_id] = job
+        job_refs[job.job_ref] = job.job_id
+    return jobs, job_refs
+
+
+def _persist_jobs_state(work_dir: Path, jobs: Dict[str, JobRecord]) -> None:
+    """Persist current jobs state to disk."""
+    state_path = _jobs_state_path(work_dir)
+    payload = {"jobs": [_serialize_job(job) for job in jobs.values()]}
+    write_json(state_path, payload)
+
+
+def _ensure_job_result_loaded(job: JobRecord) -> None:
+    """Load result payload lazily from artifacts for succeeded jobs."""
+    if job.status != "succeeded" or isinstance(job.result, dict):
+        return
+
+    manifest_value = job.artifacts.get("manifest")
+    manifest_path = (
+        Path(manifest_value)
+        if isinstance(manifest_value, str) and manifest_value.strip()
+        else None
+    )
+    if (
+        manifest_path is None
+        or not manifest_path.exists()
+        or not manifest_path.is_file()
+    ):
+        raise HTTPException(status_code=500, detail="Manifest artifact not found.")
+
+    page_table_path = _resolve_artifact_path(job, "page_table")
+    toc_tree_path = _resolve_artifact_path(job, "toc_tree")
+    if page_table_path is None or toc_tree_path is None:
+        raise HTTPException(status_code=500, detail="Required artifacts not found.")
+
+    artifacts = {
+        "manifest": str(manifest_path),
+        "page_table": str(page_table_path),
+        "toc_tree": str(toc_tree_path),
+    }
+    job.result = _build_result_payload(artifacts)
 
 
 def _build_result_payload(artifacts: Dict[str, str]) -> Dict[str, Any]:
@@ -317,9 +441,12 @@ async def _lifespan(_app: FastAPI):
         1, _env_int("DOD_SERVER_MAX_CONCURRENT_DOCS", 2)
     )
     _app.state.doc_semaphore = asyncio.Semaphore(_app.state.max_concurrent_docs)
-    _app.state.jobs: Dict[str, JobRecord] = {}
-    _app.state.job_refs: Dict[str, str] = {}
+    loaded_jobs, loaded_job_refs = _load_jobs_state(work_dir)
+    _app.state.jobs = loaded_jobs
+    _app.state.job_refs = loaded_job_refs
     _app.state.jobs_lock = asyncio.Lock()
+    if loaded_jobs:
+        _persist_jobs_state(work_dir, loaded_jobs)
     yield
 
 
@@ -348,6 +475,7 @@ async def _run_job(job_id: str, cfg: PipelineConfig) -> None:
             job = app.state.jobs[job_id]
             job.status = "running"
             job.updated_at = _now_utc_iso()
+            _persist_jobs_state(app.state.work_dir, app.state.jobs)
 
         try:
             artifacts = await asyncio.to_thread(digest_document, cfg)
@@ -372,12 +500,14 @@ async def _run_job(job_id: str, cfg: PipelineConfig) -> None:
                             merged_artifacts[key] = value
                 job.artifacts = merged_artifacts
                 job.result = result
+                _persist_jobs_state(app.state.work_dir, app.state.jobs)
         except Exception as exc:  # noqa: BLE001 - server should return job failure
             async with app.state.jobs_lock:
                 job = app.state.jobs[job_id]
                 job.status = "failed"
                 job.updated_at = _now_utc_iso()
                 job.error = str(exc)
+                _persist_jobs_state(app.state.work_dir, app.state.jobs)
 
 
 @app.get("/healthz")
@@ -449,6 +579,7 @@ async def digest(
             task=task,
         )
         app.state.job_refs[job_ref] = job_id
+        _persist_jobs_state(app.state.work_dir, app.state.jobs)
 
     if not wait:
         return {
@@ -524,6 +655,7 @@ async def get_job_result(job_ref_or_id: str) -> Dict[str, Any]:
         raise HTTPException(status_code=409, detail=f"Job is still {job.status}.")
     if job.status == "failed":
         raise HTTPException(status_code=500, detail=job.error or "Job failed")
+    _ensure_job_result_loaded(job)
     return {
         "job_id": job.job_id,
         "job_ref": job.job_ref,
