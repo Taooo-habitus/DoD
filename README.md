@@ -29,6 +29,10 @@ Why this can make more sense than traditional RAG for long manuals:
 - this improves navigation, targeted retrieval, and answer grounding for long technical documents
 - see PageIndex's technical-manual discussion: https://pageindex.ai/blog/technical-manuals
 
+Example (Codex using DoD MCP for section-grounded Q&A):
+
+![Codex + DoD MCP example](mcp_example_pics/mcp-example-codex.png)
+
 ---
 
 ## Table of Contents
