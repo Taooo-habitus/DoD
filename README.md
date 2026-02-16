@@ -1,5 +1,36 @@
 # DoD (Document Outline Discovery)
 
+> This project is intended to make local deployment and usage of PageIndex easier. It is not an official PageIndex service. Check their official PageIndex repo [here](https://github.com/VectifyAI/PageIndex).
+
+DoD is a local-first document structure extraction toolkit built around [PageIndex](https://pageindex.ai/).
+
+What it does:
+
+- ingests PDFs and builds normalized page artifacts
+- extracts page-level text (`pymupdf` or `pytesseract`)
+- generates hierarchical TOC/document outline trees
+- exposes both **CLI** and **server+MCP** interfaces for agent workflows
+
+Use cases:
+
+- document-grounded Q&A assistants over private document libraries
+- TOC/outline extraction for scanned or OCR-heavy PDFs
+- page-targeted retrieval pipelines for downstream RAG/agent systems
+
+Advantages:
+
+- local deployment for sensitive documents
+- structured outputs (TOC tree + page tables + page images)
+- agent-friendly retrieval via stable server and MCP tools
+
+Why this can make more sense than traditional RAG for long manuals:
+
+- instead of flat chunk retrieval, PageIndex builds explicit document structure (sections/subsections + page mapping)
+- this improves navigation, targeted retrieval, and answer grounding for long technical documents
+- see PageIndex's technical-manual discussion: https://pageindex.ai/blog/technical-manuals
+
+---
+
 DoD turns a document into:
 
 1. `page_table.jsonl` (page text + metadata)
