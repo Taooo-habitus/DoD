@@ -49,6 +49,7 @@ Why this can make more sense than traditional RAG for long manuals:
   - [6.4 Optional manual MCP run debug only](#64-optional-manual-mcp-run-debug-only)
   - [6.5 Available MCP tools](#65-available-mcp-tools)
   - [6.6 Example agent skill](#66-example-agent-skill)
+- [7. Third-Party Licensing](#7-third-party-licensing)
 
 DoD turns a document into:
 
@@ -359,3 +360,9 @@ Use this only for debugging MCP transport behavior.
 An example Codex skill for DoD library Q&A is included at:
 
 - `.agents/skills/dod-library-qa/SKILL.md`
+
+## 7. Third-Party Licensing
+
+This project includes third-party license attributions in:
+
+- `THIRD_PARTY_NOTICES.md`
