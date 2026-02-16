@@ -90,6 +90,7 @@ Main artifact files:
 export DOD_SERVER_HOST=0.0.0.0
 export DOD_SERVER_PORT=8000
 export DOD_SERVER_MAX_CONCURRENT_DOCS=4
+export DOD_SERVER_JOB_TIMEOUT_SECONDS=300
 export DOD_SERVER_WORK_DIR=outputs/server_jobs
 uv run python -m scripts.server
 ```
@@ -217,6 +218,17 @@ Inside `artifacts/`:
 - `toc_tree.json`
 - `manifest.json`
 
+Server-level job index:
+
+- `${DOD_SERVER_WORK_DIR}/jobs.json`
+  - persists job metadata across server restarts
+  - used by `GET /v1/jobs` and MCP `list_jobs()`
+
+Timeout:
+
+- default from `conf/config.yaml` → `server.job_timeout_seconds`
+- runtime override via `DOD_SERVER_JOB_TIMEOUT_SECONDS`
+
 ## 4. Request Fields Server `/v1/digest`
 
 Multipart form fields:
@@ -235,7 +247,7 @@ Query parameter:
 
 - `wait` (default `true`)
   - `true`: request returns when job finishes
-  - `false`: request returns immediately with `job_id`
+  - `false`: request returns immediately with job metadata (`job_id`, `job_ref`, status/result URLs)
 
 ## 5. Simple MCP Setup
 
