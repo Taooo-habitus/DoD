@@ -188,6 +188,107 @@ def test_list_jobs_returns_submitted_jobs(
         assert isinstance(item["created_at"], str)
 
 
+def test_list_jobs_persists_across_restart(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Persisted job table should survive server restart."""
+    monkeypatch.setenv("DOD_SERVER_WORK_DIR", str(tmp_path / "server_jobs"))
+    monkeypatch.setenv("DOD_SERVER_MAX_CONCURRENT_DOCS", "2")
+
+    def fake_digest_document(_cfg):
+        return {
+            "manifest": "manifest.json",
+            "page_table": "page_table.jsonl",
+            "toc_tree": "toc_tree.json",
+        }
+
+    monkeypatch.setattr(server_app, "digest_document", fake_digest_document)
+    monkeypatch.setattr(
+        server_app,
+        "_build_result_payload",
+        lambda _artifacts: {"toc_tree": {}, "page_table": [], "image_page_table": []},
+    )
+
+    with TestClient(server_app.app) as client1:
+        submit = client1.post(
+            "/v1/digest?wait=false",
+            files={"file": ("persisted.pdf", b"%PDF-1.4\nfake", "application/pdf")},
+        )
+        assert submit.status_code == 200
+        job_id = submit.json()["job_id"]
+        _wait_for_result(client1, job_id)
+
+    with TestClient(server_app.app) as client2:
+        listed = client2.get("/v1/jobs")
+        assert listed.status_code == 200
+        jobs = listed.json()["jobs"]
+        assert any(job["file_name"] == "persisted.pdf" for job in jobs)
+
+
+def test_job_result_rehydrates_after_restart(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Succeeded job result should be rebuilt from artifacts after restart."""
+    monkeypatch.setenv("DOD_SERVER_WORK_DIR", str(tmp_path / "server_jobs"))
+    monkeypatch.setenv("DOD_SERVER_MAX_CONCURRENT_DOCS", "2")
+
+    page_table_path = tmp_path / "page_table.jsonl"
+    image_page_table_path = tmp_path / "image_page_table.jsonl"
+    toc_tree_path = tmp_path / "toc_tree.json"
+    manifest_path = tmp_path / "manifest.json"
+    page_table_path.write_text(
+        json.dumps({"page_id": 1, "text": "hello"}) + "\n", encoding="utf-8"
+    )
+    image_page_table_path.write_text(
+        json.dumps({"page_id": 1, "image_path": "p1.png", "image_b64": "a"}) + "\n",
+        encoding="utf-8",
+    )
+    toc_tree_path.write_text(
+        json.dumps({"doc_name": "doc", "structure": []}), encoding="utf-8"
+    )
+    manifest_path.write_text(
+        json.dumps(
+            {
+                "artifacts": {
+                    "page_table": str(page_table_path),
+                    "image_page_table": str(image_page_table_path),
+                    "toc_tree": str(toc_tree_path),
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    def fake_digest_document(_cfg):
+        return {
+            "manifest": str(manifest_path),
+            "page_table": str(page_table_path),
+            "toc_tree": str(toc_tree_path),
+        }
+
+    monkeypatch.setattr(server_app, "digest_document", fake_digest_document)
+
+    with TestClient(server_app.app) as client1:
+        submit = client1.post(
+            "/v1/digest?wait=false",
+            files={"file": ("rehydrate.pdf", b"%PDF-1.4\nfake", "application/pdf")},
+        )
+        assert submit.status_code == 200
+        job_id = submit.json()["job_id"]
+        _wait_for_result(client1, job_id)
+
+        state_path = tmp_path / "server_jobs" / "jobs.json"
+        persisted = json.loads(state_path.read_text(encoding="utf-8"))
+        assert isinstance(persisted.get("jobs"), list)
+        assert "result" not in persisted["jobs"][0]
+
+    with TestClient(server_app.app) as client2:
+        result = client2.get(f"/v1/jobs/{job_id}/result")
+        assert result.status_code == 200
+        payload = result.json()["result"]
+        assert payload["page_table"][0]["text"] == "hello"
+
+
 def test_digest_sync_failure_returns_500(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
