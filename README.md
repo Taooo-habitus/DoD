@@ -31,6 +31,25 @@ Why this can make more sense than traditional RAG for long manuals:
 
 ---
 
+## Table of Contents
+
+- [Project Structure](#project-structure)
+- [0. LLM API Configuration Required](#0-llm-api-configuration-required)
+- [1. Install and Dev](#1-install-and-dev)
+- [2. Run As A Package CLI](#2-run-as-a-package-cli)
+- [3. Run As A Server](#3-run-as-a-server)
+  - [3.1 Start server](#31-start-server)
+  - [3.2 Health check](#32-health-check)
+  - [3.3 Make requests](#33-make-requests)
+- [4. Output What And Where](#4-output-what-and-where)
+- [5. Request Fields Server `/v1/digest`](#5-request-fields-server-v1digest)
+- [6. Simple MCP Setup](#6-simple-mcp-setup)
+  - [6.2 Start DoD HTTP server](#62-start-dod-http-server)
+  - [6.3 Configure MCP client recommended](#63-configure-mcp-client-recommended)
+  - [6.4 Optional manual MCP run debug only](#64-optional-manual-mcp-run-debug-only)
+  - [6.5 Available MCP tools](#65-available-mcp-tools)
+  - [6.6 Example agent skill](#66-example-agent-skill)
+
 DoD turns a document into:
 
 1. `page_table.jsonl` (page text + metadata)
