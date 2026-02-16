@@ -6,6 +6,7 @@ authors = [
     { name = "Tao Tang", email = "ttan@habitus.dk" }
 ]
 readme = "README.md"
+license = "MIT"
 dependencies = [
     "hydra-core>=1.3.2",
     "omegaconf>=2.3.0",
