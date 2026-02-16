@@ -4,12 +4,13 @@ DoD turns a document into:
 
 1. `page_table.jsonl` (page text + metadata)
 2. `toc_tree.json` (hierarchical TOC tree)
-3. `image_page_table.jsonl` (raw page images encoded as base64)
+3. `image_page_table.jsonl` (page-image index, including image paths and image payload fields)
+4. `images/` (all pages rendered as image files)
 
 Core flow:
 
 1. PDF normalization to page images
-2. Text extraction (`pymupdf` / `pymupdf4llm`)
+2. Text extraction (`pymupdf` / `pytesseract`)
 3. TOC generation (PageIndex)
 4. Artifact writing (JSON/JSONL + manifest)
 
@@ -23,8 +24,10 @@ Core flow:
 - `src/DoD/pageindex/` - PageIndex TOC builder
 - `src/DoD/toc/` - TOC adapters
 - `src/DoD/server/` - FastAPI server mode
+- `src/scripts/` - executable entrypoints (`dod`, `dod-server`, `dod-mcp`)
+- `.agents/skills/` - example agent skills
+- `makefile` - install/check/test developer workflow
 - `conf/config.yaml` - default configuration
-- `examples/` - sample documents
 
 ## 0. LLM API Configuration Required
 
@@ -44,27 +47,28 @@ export PAGEINDEX_BASE_URL="https://<account-identifier>.snowflakecomputing.com/a
 
 Then choose any model available on your configured endpoint via `toc.model`.
 
-## Setup
+## 1. Install and Dev
+
+Use these commands for setup and day-to-day development:
 
 ```bash
-uv venv
-source .venv/bin/activate
-uv pip install -e .
+make install  # bootstrap toolchain + Python deps + hooks
+make check    # lint + format + type-check
+make test     # run test suite
 ```
 
-Install server extras when using API mode:
-
-```bash
-uv pip install -e ".[server]"
-```
-
-## 1. Run As A Package CLI
+## 2. Run As A Package CLI
 
 Run one document:
 
+Choose extractor first:
+
+- use `text_extractor.backend=pymupdf` for PDFs with built-in text layers
+- use `text_extractor.backend=pytesseract` for image-based/scanned PDFs
+
 ```bash
-uv run python -m scripts.main \
-  input_path=examples/Paa-vej-til-dansk.pdf \
+uv run dod \
+  input_path=/path/to/document.pdf \
   text_extractor.backend=pymupdf \
   toc.backend=pageindex \
   toc.model=claude-sonnet-4-5
@@ -82,9 +86,9 @@ Main artifact files:
 - `toc_tree.json`
 - `manifest.json`
 
-## 2. Run As A Server
+## 3. Run As A Server
 
-### 2.1 Start server
+### 3.1 Start server
 
 ```bash
 export DOD_SERVER_HOST=0.0.0.0
@@ -92,22 +96,22 @@ export DOD_SERVER_PORT=8000
 export DOD_SERVER_MAX_CONCURRENT_DOCS=4
 export DOD_SERVER_JOB_TIMEOUT_SECONDS=300
 export DOD_SERVER_WORK_DIR=outputs/server_jobs
-uv run python -m scripts.server
+uv run dod-server
 ```
 
-### 2.2 Health check
+### 3.2 Health check
 
 ```bash
 curl http://localhost:8000/healthz
 ```
 
-### 2.3 Make requests
+### 3.3 Make requests
 
-#### 2.3.1 Single PDF wait for final result
+#### 3.3.1 Single PDF wait for final result
 
 ```bash
 curl -s -X POST "http://localhost:8000/v1/digest" \
-  -F "file=@examples/Paa-vej-til-dansk.pdf" \
+  -F "file=@/path/to/document.pdf" \
   -F "text_extractor_backend=pymupdf" \
   -F "toc_backend=pageindex" \
   -F "toc_model=claude-sonnet-4-5" \
@@ -117,13 +121,13 @@ curl -s -X POST "http://localhost:8000/v1/digest" \
 
 This call blocks until the job is done and writes full result JSON to `result.json`.
 
-#### 2.3.2 Async job submit then poll
+#### 3.3.2 Async job submit then poll
 
 Submit:
 
 ```bash
 SUBMIT_JSON=$(curl -s -X POST "http://localhost:8000/v1/digest?wait=false" \
-  -F "file=@examples/Paa-vej-til-dansk.pdf" \
+  -F "file=@/path/to/document.pdf" \
   -F "text_extractor_backend=pymupdf" \
   -F "toc_backend=pageindex" \
   -F "toc_model=claude-sonnet-4-5")
@@ -143,7 +147,7 @@ Get final result:
 curl -s "http://localhost:8000/v1/jobs/$JOB_REF/result" > result.json
 ```
 
-#### 2.3.3 Process More Than One PDF At The Same Time
+#### 3.3.3 Process More Than One PDF At The Same Time
 
 Use async submit (`wait=false`) + parallel curl:
 
@@ -183,9 +187,9 @@ Notes:
 - Server-side processing concurrency is capped by `DOD_SERVER_MAX_CONCURRENT_DOCS`.
 - TOC runs in strict mode: if PageIndex fails, the job status becomes `failed` (no fallback TOC).
 
-## 3. Output What And Where
+## 4. Output What And Where
 
-### 3.1 Output in API response JSON
+### 4.1 Output in API response JSON
 
 `/v1/digest` (sync) or `/v1/jobs/{job_id}/result` returns:
 
@@ -203,7 +207,7 @@ jq -c '.result.image_page_table[]' result.json > image_page_table.jsonl
 jq '.result.toc_tree' result.json > toc_tree.json
 ```
 
-### 3.2 Output on disk Server mode
+### 4.2 Output on disk Server mode
 
 For each job:
 
@@ -229,12 +233,14 @@ Timeout:
 - default from `conf/config.yaml` → `server.job_timeout_seconds`
 - runtime override via `DOD_SERVER_JOB_TIMEOUT_SECONDS`
 
-## 4. Request Fields Server `/v1/digest`
+## 5. Request Fields Server `/v1/digest`
 
 Multipart form fields:
 
 - `file` (required, `.pdf`)
-- `text_extractor_backend` (optional, recommended: `pymupdf`)
+- `text_extractor_backend` (optional)
+  - use `pymupdf` for PDFs with built-in text layers
+  - use `pytesseract` for image-based/scanned PDFs
 - `normalize_max_pages` (optional int)
 - `toc_backend` (optional, typically `pageindex`)
 - `toc_model` (optional model name)
@@ -249,30 +255,41 @@ Query parameter:
   - `true`: request returns when job finishes
   - `false`: request returns immediately with job metadata (`job_id`, `job_ref`, status/result URLs)
 
-## 5. Simple MCP Setup
+## 6. Simple MCP Setup
 
 If you want agents to call DoD as tools, use the included MCP wrapper at `src/scripts/dod_mcp.py`.
 Agents do not upload PDFs. Human users submit jobs first via `/v1/digest`, then agents use `job_ref` to retrieve targeted outputs.
 
-### 5.1 Install MCP dependencies
+`make install` already installs all extras including MCP/server dependencies.
 
-```bash
-uv pip install -e ".[mcp]"
-```
-
-### 5.2 Start DoD HTTP server
+### 6.2 Start DoD HTTP server
 
 ```bash
 uv run dod-server
 ```
 
-### 5.3 Run MCP server
+### 6.3 Configure MCP client recommended
+
+Most MCP hosts should launch `dod-mcp` themselves via command config, for example (`~/.codex/config.toml`):
+
+```toml
+[mcp_servers.dod_mcp]
+command = "uv"
+args = ["run", "dod-mcp"]
+cwd = "/path/to/DoD"
+```
+
+In this mode, do not start `dod-mcp` manually. Keep only `dod-server` running.
+
+### 6.4 Optional manual MCP run debug only
 
 ```bash
 uv run dod-mcp
 ```
 
-### 5.4 Available MCP tools
+Use this only for debugging MCP transport behavior.
+
+### 6.5 Available MCP tools
 
 - `list_jobs()`
   - Returns: `{ jobs: [{ file_name, job_id, job_ref, status, created_at }] }`.
@@ -286,3 +303,9 @@ uv run dod-mcp
 - Retrieval guardrails come from `conf/config.yaml` under `retrieval`:
   - `max_chars_per_page` (`null` means full page text)
   - `max_pages_per_call`
+
+### 6.6 Example agent skill
+
+An example Codex skill for DoD library Q&A is included at:
+
+- `.agents/skills/dod-library-qa/SKILL.md`
