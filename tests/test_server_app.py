@@ -127,6 +127,25 @@ def test_digest_rejects_non_pdf(client: TestClient) -> None:
     assert "Only PDF input is supported" in response.json()["detail"]
 
 
+def test_digest_normalizes_uploaded_filename(client: TestClient) -> None:
+    """Uploaded filename should be normalized to basename for job metadata."""
+    response = client.post(
+        "/v1/digest?wait=false",
+        files={
+            "file": (
+                "../../a-clinical-introduction.pdf",
+                b"%PDF-1.4\nfake",
+                "application/pdf",
+            )
+        },
+    )
+    assert response.status_code == 200
+    job_id = response.json()["job_id"]
+    job = client.get(f"/v1/jobs/{job_id}")
+    assert job.status_code == 200
+    assert job.json()["file_name"] == "a-clinical-introduction.pdf"
+
+
 def test_digest_rejects_empty_pdf(client: TestClient) -> None:
     """Server should reject empty PDF payloads."""
     response = client.post(
@@ -304,6 +323,49 @@ def test_digest_sync_failure_returns_500(
     )
     assert response.status_code == 500
     assert "boom" in response.json()["detail"]
+
+
+def test_job_times_out_and_marks_failed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Jobs exceeding configured timeout should be marked failed."""
+    monkeypatch.setenv("DOD_SERVER_WORK_DIR", str(tmp_path / "server_jobs"))
+    monkeypatch.setenv("DOD_SERVER_MAX_CONCURRENT_DOCS", "2")
+    monkeypatch.setenv("DOD_SERVER_JOB_TIMEOUT_SECONDS", "1")
+
+    def fake_digest_document(_cfg):
+        time.sleep(1.2)
+        return {
+            "manifest": "manifest.json",
+            "page_table": "page_table.jsonl",
+            "toc_tree": "toc_tree.json",
+        }
+
+    monkeypatch.setattr(server_app, "digest_document", fake_digest_document)
+    monkeypatch.setattr(
+        server_app,
+        "_build_result_payload",
+        lambda _artifacts: {"toc_tree": {}, "page_table": [], "image_page_table": []},
+    )
+
+    with TestClient(server_app.app) as local_client:
+        submit = local_client.post(
+            "/v1/digest?wait=false",
+            files={"file": ("slow.pdf", b"%PDF-1.4\nfake", "application/pdf")},
+        )
+        assert submit.status_code == 200
+        job_id = submit.json()["job_id"]
+        deadline = time.time() + 5.0
+        while time.time() < deadline:
+            status_resp = local_client.get(f"/v1/jobs/{job_id}")
+            assert status_resp.status_code == 200
+            payload = status_resp.json()
+            if payload["status"] == "failed":
+                assert "timed out" in (payload.get("error") or "")
+                break
+            time.sleep(0.05)
+        else:
+            raise AssertionError("Timed out waiting for failed status")
 
 
 def test_build_result_payload_reads_artifacts(tmp_path: Path) -> None:

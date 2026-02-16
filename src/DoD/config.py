@@ -58,6 +58,13 @@ class RetrievalConfig:
 
 
 @dataclass
+class ServerConfig:
+    """Settings for DoD server runtime."""
+
+    job_timeout_seconds: int = 300
+
+
+@dataclass
 class ArtifactConfig:
     """Output artifact filenames."""
 
@@ -80,4 +87,5 @@ class PipelineConfig:
     page_table: PageTableConfig = field(default_factory=PageTableConfig)
     toc: TocConfig = field(default_factory=TocConfig)
     retrieval: RetrievalConfig = field(default_factory=RetrievalConfig)
+    server: ServerConfig = field(default_factory=ServerConfig)
     artifacts: ArtifactConfig = field(default_factory=ArtifactConfig)

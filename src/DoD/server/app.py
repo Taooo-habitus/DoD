@@ -434,11 +434,15 @@ async def _lifespan(_app: FastAPI):
     logging.getLogger("DoD").setLevel(logging.INFO)
     logging.getLogger("httpx").setLevel(logging.WARNING)
     logging.getLogger("httpcore").setLevel(logging.WARNING)
+    server_cfg = _load_default_config().server
     work_dir = Path(os.getenv("DOD_SERVER_WORK_DIR", "outputs/server_jobs")).resolve()
     work_dir.mkdir(parents=True, exist_ok=True)
     _app.state.work_dir = work_dir
     _app.state.max_concurrent_docs = max(
         1, _env_int("DOD_SERVER_MAX_CONCURRENT_DOCS", 2)
+    )
+    _app.state.job_timeout_seconds = max(
+        1, _env_int("DOD_SERVER_JOB_TIMEOUT_SECONDS", server_cfg.job_timeout_seconds)
     )
     _app.state.doc_semaphore = asyncio.Semaphore(_app.state.max_concurrent_docs)
     loaded_jobs, loaded_job_refs = _load_jobs_state(work_dir)
@@ -477,9 +481,15 @@ async def _run_job(job_id: str, cfg: PipelineConfig) -> None:
             job.updated_at = _now_utc_iso()
             _persist_jobs_state(app.state.work_dir, app.state.jobs)
 
-        try:
+        async def _execute_pipeline() -> tuple[Dict[str, str], Dict[str, Any]]:
             artifacts = await asyncio.to_thread(digest_document, cfg)
             result = await asyncio.to_thread(_build_result_payload, artifacts)
+            return artifacts, result
+
+        try:
+            artifacts, result = await asyncio.wait_for(
+                _execute_pipeline(), timeout=app.state.job_timeout_seconds
+            )
             summary = result.get("profiling_summary")
             if summary:
                 logger.info("Pipeline finished: %s", summary)
@@ -501,6 +511,14 @@ async def _run_job(job_id: str, cfg: PipelineConfig) -> None:
                 job.artifacts = merged_artifacts
                 job.result = result
                 _persist_jobs_state(app.state.work_dir, app.state.jobs)
+        except asyncio.TimeoutError:
+            async with app.state.jobs_lock:
+                job = app.state.jobs[job_id]
+                job.status = "failed"
+                job.updated_at = _now_utc_iso()
+                timeout_seconds = int(app.state.job_timeout_seconds)
+                job.error = f"Job timed out after {timeout_seconds}s."
+                _persist_jobs_state(app.state.work_dir, app.state.jobs)
         except Exception as exc:  # noqa: BLE001 - server should return job failure
             async with app.state.jobs_lock:
                 job = app.state.jobs[job_id]
@@ -516,6 +534,7 @@ async def healthz() -> Dict[str, Any]:
     return {
         "status": "ok",
         "max_concurrent_docs": app.state.max_concurrent_docs,
+        "job_timeout_seconds": app.state.job_timeout_seconds,
         "work_dir": str(app.state.work_dir),
     }
 
@@ -534,7 +553,8 @@ async def digest(
     wait: bool = Query(default=True),
 ) -> Dict[str, Any]:
     """Submit a PDF digestion job; optionally wait for completion."""
-    filename = file.filename or "input.pdf"
+    raw_filename = file.filename or "input.pdf"
+    filename = Path(raw_filename).name or "input.pdf"
     suffix = Path(filename).suffix.lower() or ".pdf"
     if suffix != ".pdf":
         raise HTTPException(status_code=400, detail="Only PDF input is supported.")

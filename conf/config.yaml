@@ -37,6 +37,9 @@ retrieval:
   max_chars_per_page: null
   max_pages_per_call: 8
 
+server:
+  job_timeout_seconds: 300
+
 artifacts:
   output_dir: "artifacts"
   page_table_filename: "page_table.jsonl"
