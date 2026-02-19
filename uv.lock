@@ -463,7 +463,7 @@ wheels = [
 ]
 
 [[package]]
-name = "dod"
+name = "dod-outline-discovery"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
