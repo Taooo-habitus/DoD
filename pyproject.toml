@@ -1,5 +1,5 @@
 [project]
-name = "DoD"
+name = "dod-outline-discovery"
 version = "0.1.0"
 description = "Document Outline Discovery."
 authors = [
@@ -137,3 +137,9 @@ build-backend = "hatchling.build"
 
 [tool.hatch.metadata]
 allow-direct-references = true
+
+[tool.hatch.build.targets.wheel]
+packages = [
+    "src/DoD",
+    "src/scripts",
+]
