@@ -1,6 +1,6 @@
 [project]
 name = "dod-outline-discovery"
-version = "0.1.0"
+version = "0.1.2"
 description = "Document Outline Discovery."
 authors = [
     { name = "Tao Tang", email = "ttan@habitus.dk" }

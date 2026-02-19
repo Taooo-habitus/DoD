@@ -40,14 +40,17 @@ Example (Codex using DoD MCP for section-grounded Q&A):
 - [Project Structure](#project-structure)
 - [0. LLM API Configuration Required](#0-llm-api-configuration-required)
 - [1. Install and Dev](#1-install-and-dev)
+- [1.1 Use as a PyPI package](#11-use-as-a-pypi-package)
 - [2. Run As A Package CLI](#2-run-as-a-package-cli)
 - [3. Run As A Server](#3-run-as-a-server)
   - [3.1 Start server](#31-start-server)
   - [3.2 Health check](#32-health-check)
   - [3.3 Make requests](#33-make-requests)
 - [4. Output What And Where](#4-output-what-and-where)
+  - [4.3 Configure output paths PyPI package](#43-configure-output-paths-pypi-package)
 - [5. Request Fields Server `/v1/digest`](#5-request-fields-server-v1digest)
 - [6. Simple MCP Setup](#6-simple-mcp-setup)
+  - [6.1 Install from PyPI for MCP use](#61-install-from-pypi-for-mcp-use)
   - [6.2 Start DoD HTTP server](#62-start-dod-http-server)
   - [6.3 Configure MCP client recommended](#63-configure-mcp-client-recommended)
   - [6.4 Optional manual MCP run debug only](#64-optional-manual-mcp-run-debug-only)
@@ -82,7 +85,7 @@ Core flow:
 - `src/scripts/` - executable entrypoints (`dod`, `dod-server`, `dod-mcp`)
 - `.agents/skills/` - example agent skills
 - `makefile` - install/check/test developer workflow
-- `conf/config.yaml` - default configuration
+- `src/DoD/conf/config.yaml` - default configuration
 
 ## 0. LLM API Configuration Required
 
@@ -112,6 +115,30 @@ make check    # lint + format + type-check
 make test     # run test suite
 ```
 
+### 1.1 Use as a PyPI package
+
+Install from PyPI:
+
+```bash
+pip install "dod-outline-discovery[pageindex,text_extractor,pdf,server,mcp]"
+```
+
+Then run:
+
+```bash
+dod --help
+dod-server --help
+dod-mcp --help
+```
+
+One-off execution without a persistent install:
+
+```bash
+uvx --from "dod-outline-discovery[pageindex,text_extractor,pdf,server,mcp]" dod --help
+uvx --from "dod-outline-discovery[pageindex,text_extractor,pdf,server,mcp]" dod-server --help
+uvx --from "dod-outline-discovery[pageindex,text_extractor,pdf,server,mcp]" dod-mcp --help
+```
+
 ## 2. Run As A Package CLI
 
 Run one document:
@@ -122,12 +149,14 @@ Choose extractor first:
 - use `text_extractor.backend=pytesseract` for image-based/scanned PDFs
 
 ```bash
-uv run dod \
+dod \
   input_path=/path/to/document.pdf \
   text_extractor.backend=pymupdf \
   toc.backend=pageindex \
   toc.model=claude-sonnet-4-5
 ```
+
+If you are running from source repo instead of a PyPI install, use `uv run dod`.
 
 Where output is written:
 
@@ -151,8 +180,10 @@ export DOD_SERVER_PORT=8000
 export DOD_SERVER_MAX_CONCURRENT_DOCS=4
 export DOD_SERVER_JOB_TIMEOUT_SECONDS=300
 export DOD_SERVER_WORK_DIR=outputs/server_jobs
-uv run dod-server
+dod-server
 ```
+
+If you are running from source repo instead of a PyPI install, use `uv run dod-server`.
 
 ### 3.2 Health check
 
@@ -285,8 +316,28 @@ Server-level job index:
 
 Timeout:
 
-- default from `conf/config.yaml` → `server.job_timeout_seconds`
+- default from `src/DoD/conf/config.yaml` → `server.job_timeout_seconds`
 - runtime override via `DOD_SERVER_JOB_TIMEOUT_SECONDS`
+
+### 4.3 Configure output paths PyPI package
+
+When installed from PyPI, outputs are still filesystem-based and default to the current working directory.
+
+- CLI (`dod`): defaults to Hydra output under `outputs/<YYYY-MM-DD>/<HH-MM-SS>/artifacts`
+- Server (`dod-server`): defaults to `outputs/server_jobs`
+
+Use absolute paths in production/local deployments:
+
+```bash
+export DOD_SERVER_WORK_DIR="/absolute/path/to/server_jobs"
+export DOD_LLM_CACHE_DIR="/absolute/path/to/llm_cache"
+```
+
+Optional CLI override for one run:
+
+```bash
+dod input_path=/path/to/document.pdf artifacts.output_dir=/absolute/path/to/artifacts
+```
 
 ## 5. Request Fields Server `/v1/digest`
 
@@ -317,11 +368,21 @@ Agents do not upload PDFs. Human users submit jobs first via `/v1/digest`, then 
 
 `make install` already installs all extras including MCP/server dependencies.
 
+### 6.1 Install from PyPI for MCP use
+
+```bash
+uv tool install "dod-outline-discovery[pageindex,text_extractor,pdf,server,mcp]"
+```
+
+This installs `dod`, `dod-server`, and `dod-mcp` as system tools.
+
 ### 6.2 Start DoD HTTP server
 
 ```bash
-uv run dod-server
+dod-server
 ```
+
+If you are running from source repo instead of PyPI install, use `uv run dod-server`.
 
 ### 6.3 Configure MCP client recommended
 
@@ -329,9 +390,15 @@ Most MCP hosts should launch `dod-mcp` themselves via command config, for exampl
 
 ```toml
 [mcp_servers.dod_mcp]
-command = "uv"
-args = ["run", "dod-mcp"]
-cwd = "/path/to/DoD"
+command = "dod-mcp"
+```
+
+Alternative without tool install:
+
+```toml
+[mcp_servers.dod_mcp]
+command = "uvx"
+args = ["--from", "dod-outline-discovery[pageindex,text_extractor,pdf,server,mcp]", "dod-mcp"]
 ```
 
 In this mode, do not start `dod-mcp` manually. Keep only `dod-server` running.
@@ -339,9 +406,10 @@ In this mode, do not start `dod-mcp` manually. Keep only `dod-server` running.
 ### 6.4 Optional manual MCP run debug only
 
 ```bash
-uv run dod-mcp
+dod-mcp
 ```
 
+If you are running from source repo instead of a PyPI install, use `uv run dod-mcp`.
 Use this only for debugging MCP transport behavior.
 
 ### 6.5 Available MCP tools
@@ -355,7 +423,7 @@ Use this only for debugging MCP transport behavior.
 - `get_page_images(job_ref, pages, mode)`
   - Returns: `{ job_id, job_ref, status, mode, requested_pages, returned_pages, pages }` where `pages` is a selected subset of `{ page_id, image_path }` (`mode=path`) or `{ page_id, image_b64 }` (`mode=base64`).
 - `pages` accepts flexible specs like `"110,111,89-100"`.
-- Retrieval guardrails come from `conf/config.yaml` under `retrieval`:
+- Retrieval guardrails come from `src/DoD/conf/config.yaml` under `retrieval`:
   - `max_chars_per_page` (`null` means full page text)
   - `max_pages_per_call`
 
