@@ -15,7 +15,7 @@ from DoD.pipeline import digest_document
 cs = ConfigStore.instance()
 cs.store(name="config", node=PipelineConfig)
 
-CONFIG_PATH = str(Path(__file__).resolve().parents[3] / "conf")
+CONFIG_PATH = str(Path(__file__).resolve().parents[1] / "conf")
 
 
 @hydra.main(config_path=CONFIG_PATH, config_name="config", version_base=None)

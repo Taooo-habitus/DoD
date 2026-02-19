@@ -16,8 +16,8 @@ BASE_URL = "http://127.0.0.1:8000"
 
 
 def _load_retrieval_defaults() -> tuple[Optional[int], int]:
-    """Load MCP retrieval guardrails from conf/config.yaml."""
-    config_path = Path(__file__).resolve().parents[2] / "conf" / "config.yaml"
+    """Load MCP retrieval guardrails from packaged DoD config."""
+    config_path = Path(__file__).resolve().parents[1] / "DoD" / "conf" / "config.yaml"
     cfg = PipelineConfig()
     if config_path.exists():
         raw_cfg = OmegaConf.load(str(config_path))

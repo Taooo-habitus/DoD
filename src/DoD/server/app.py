@@ -397,7 +397,7 @@ def _build_pipeline_config(
 
 
 def _load_default_config() -> PipelineConfig:
-    """Load config defaults from conf/config.yaml for server jobs."""
+    """Load config defaults from packaged DoD config for server jobs."""
     try:
         import yaml
         from omegaconf import OmegaConf
@@ -406,7 +406,7 @@ def _load_default_config() -> PipelineConfig:
             "pyyaml and omegaconf are required to load server config defaults."
         ) from exc
 
-    config_path = Path(__file__).resolve().parents[3] / "conf" / "config.yaml"
+    config_path = Path(__file__).resolve().parents[1] / "conf" / "config.yaml"
     cfg = PipelineConfig()
     if not config_path.exists():
         return cfg
@@ -454,7 +454,7 @@ async def _lifespan(_app: FastAPI):
     yield
 
 
-app = FastAPI(title="DoD Server", version="0.1.0", lifespan=_lifespan)
+app = FastAPI(title="DoD Server", version="0.1.1", lifespan=_lifespan)
 
 
 async def _get_job_or_404(job_ref_or_id: str) -> JobRecord:
